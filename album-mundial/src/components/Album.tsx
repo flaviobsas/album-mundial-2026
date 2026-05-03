@@ -1,0 +1,434 @@
+'use client'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import type { User } from '@supabase/supabase-js'
+import { createClient } from '@/lib/supabase'
+import { GROUPS, TEAM_FULL, TEAM_ISO, TEAM_GRAD, PLAYERS } from '@/lib/data'
+import type { StickerState } from '@/lib/data'
+import Scanner from './Scanner'
+
+const GROUP_COLORS: Record<string, { bg: string; text: string; bar: string; border: string }> = {
+  'Grupo A': { bg:'#fef2f2', text:'#991b1b', bar:'#ef4444', border:'#fca5a5' },
+  'Grupo B': { bg:'#fff7ed', text:'#9a3412', bar:'#f97316', border:'#fdba74' },
+  'Grupo C': { bg:'#fefce8', text:'#854d0e', bar:'#eab308', border:'#fde047' },
+  'Grupo D': { bg:'#f0fdf4', text:'#14532d', bar:'#22c55e', border:'#86efac' },
+  'Grupo E': { bg:'#ecfdf5', text:'#064e3b', bar:'#10b981', border:'#6ee7b7' },
+  'Grupo F': { bg:'#ecfeff', text:'#164e63', bar:'#06b6d4', border:'#67e8f9' },
+  'Grupo G': { bg:'#eff6ff', text:'#1e3a8a', bar:'#3b82f6', border:'#93c5fd' },
+  'Grupo H': { bg:'#f5f3ff', text:'#4c1d95', bar:'#8b5cf6', border:'#c4b5fd' },
+  'Grupo I': { bg:'#fdf4ff', text:'#701a75', bar:'#d946ef', border:'#e879f9' },
+  'Grupo J': { bg:'#fff1f2', text:'#881337', bar:'#f43f5e', border:'#fda4af' },
+  'Grupo K': { bg:'#fff7ed', text:'#7c2d12', bar:'#fb923c', border:'#fed7aa' },
+  'Grupo L': { bg:'#f0fdf4', text:'#1a2e05', bar:'#65a30d', border:'#a3e635' },
+  'Especiales': { bg:'#f8fafc', text:'#334155', bar:'#64748b', border:'#cbd5e1' },
+}
+
+export default function Album({ user }: { user: User }) {
+  const supabase = createClient()
+  const [state, setState] = useState<StickerState>({})
+  const [saveStatus, setSaveStatus] = useState<'saved'|'saving'|'error'>('saved')
+  const [editMode, setEditMode] = useState(false)
+  const [curFilter, setCurFilter] = useState<'all'|'tengo'|'falta'|'repetida'>('all')
+  const [search, setSearch] = useState('')
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [showScanner, setShowScanner] = useState(false)
+  const [showMenu, setShowMenu] = useState(false)
+  const [repPopover, setRepPopover] = useState<{ team: string; num: number } | null>(null)
+  const [photoCache, setPhotoCache] = useState<Record<string, string>>({})
+  const saveTimeout = useRef<NodeJS.Timeout>()
+
+  // ── Cargar state desde API ──
+  useEffect(() => {
+    fetch('/api/figuritas')
+      .then(r => r.json())
+      .then(d => { if (d.state) setState(d.state) })
+  }, [])
+
+  // ── Guardar cambio individual ──
+  const saveOne = useCallback(async (team: string, num: number, valor: number) => {
+    setSaveStatus('saving')
+    clearTimeout(saveTimeout.current)
+    saveTimeout.current = setTimeout(async () => {
+      try {
+        await fetch('/api/figuritas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ team, num, valor })
+        })
+        setSaveStatus('saved')
+      } catch { setSaveStatus('error') }
+    }, 400)
+  }, [])
+
+  const stateKey = (t: string, n: number) => `${t}_${n}`
+
+  const toggleSticker = (team: string, num: number) => {
+    if (!editMode) return
+    const k = stateKey(team, num)
+    const v = state[k] || 0
+    const newVal = v === 0 ? 1 : 0
+    setState(s => ({ ...s, [k]: newVal }))
+    if (newVal === 0) {
+      setState(s => { const n = { ...s }; delete n[k]; return n })
+    }
+    saveOne(team, num, newVal)
+  }
+
+  const handleRepBtn = (team: string, num: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!editMode) return
+    const k = stateKey(team, num)
+    const v = state[k] || 0
+    const rep = v - 1
+    if (rep === 0) {
+      const newVal = 2
+      setState(s => ({ ...s, [k]: newVal }))
+      saveOne(team, num, newVal)
+    } else {
+      setRepPopover({ team, num })
+    }
+  }
+
+  const changeRep = (delta: number) => {
+    if (!repPopover) return
+    const { team, num } = repPopover
+    const k = stateKey(team, num)
+    const v = state[k] || 0
+    const rep = Math.max(0, v - 1)
+    const newRep = Math.max(0, Math.min(5, rep + delta))
+    const newVal = newRep + 1
+    setState(s => ({ ...s, [k]: newVal }))
+    saveOne(team, num, newVal)
+  }
+
+  const handleScanConfirm = (team: string, num: number) => {
+    const k = stateKey(team, num)
+    const v = state[k] || 0
+    const newVal = v === 0 ? 1 : v + 1
+    setState(s => ({ ...s, [k]: newVal }))
+    saveOne(team, num, newVal)
+  }
+
+  const logout = async () => {
+    await supabase.auth.signOut()
+    window.location.reload()
+  }
+
+  // ── Stats ──
+  const total = GROUPS.reduce((a, g) => a + Object.values(g.teams).reduce((b, c) => b + c, 0), 0)
+  const tengo = Object.values(state).filter(v => v >= 1).length
+  const repetidas = Object.values(state).reduce((a, v) => a + Math.max(0, v - 1), 0)
+
+  // ── Filter logic ──
+  const isVisible = (team: string, num: number) => {
+    const k = stateKey(team, num)
+    const v = state[k] || 0
+    const isTengo = v >= 1
+    const isRep = v >= 2
+    if (curFilter === 'tengo' && !isTengo) return false
+    if (curFilter === 'falta' && isTengo) return false
+    if (curFilter === 'repetida' && !isRep) return false
+    if (search) {
+      const q = search.toUpperCase().replace(/\s/g, '')
+      const teamName = (TEAM_FULL[team] || '').toUpperCase().replace(/\s/g, '')
+      if (!`${team}${num}`.includes(q) && !teamName.includes(q) && !team.includes(q)) return false
+    }
+    return true
+  }
+
+  const repCount = repPopover ? Math.max(0, (state[stateKey(repPopover.team, repPopover.num)] || 1) - 1) : 0
+
+  return (
+    <div className="max-w-5xl mx-auto pb-24">
+      {/* Header */}
+      <div className="sticky top-0 z-40 bg-white border-b border-gray-100 px-4 py-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="text-lg font-bold text-gray-900">Álbum Copa 2026 🏆</h1>
+            <p className={`text-xs mt-0.5 ${saveStatus === 'saved' ? 'text-green-600' : saveStatus === 'error' ? 'text-red-500' : 'text-amber-500'}`}>
+              {saveStatus === 'saved' ? '● Guardado' : saveStatus === 'saving' ? '● Guardando...' : '● Error al guardar'}
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {[
+              { label: 'Total', val: total, cls: 'text-gray-900' },
+              { label: 'Tengo', val: tengo, cls: 'text-green-600' },
+              { label: 'Falta', val: total - tengo, cls: 'text-red-500' },
+              { label: 'Rep.', val: repetidas, cls: 'text-amber-500' },
+            ].map(s => (
+              <div key={s.label} className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-center min-w-[60px]">
+                <div className={`text-lg font-bold ${s.cls}`}>{s.val}</div>
+                <div className="text-[10px] text-gray-400 uppercase tracking-wide">{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Search + filters */}
+        <div className="flex gap-2 mt-3 flex-wrap items-center">
+          <input
+            value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Ej: ARG 17, Messi, Brasil..."
+            className="flex-1 min-w-[150px] text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-gray-400"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="text-xs bg-gray-100 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-200">✕ Quitar</button>
+          )}
+          {(['all','tengo','falta','repetida'] as const).map(f => (
+            <button key={f} onClick={() => setCurFilter(f)}
+              className={`text-xs px-3 py-2 rounded-lg border font-medium transition ${
+                curFilter === f
+                  ? f === 'all' ? 'bg-gray-100 border-gray-400 text-gray-900'
+                  : f === 'tengo' ? 'bg-green-50 border-green-400 text-green-700'
+                  : f === 'falta' ? 'bg-red-50 border-red-300 text-red-700'
+                  : 'bg-amber-50 border-amber-400 text-amber-700'
+                  : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+              }`}>
+              {f === 'all' ? 'Todas' : f === 'tengo' ? 'Tengo' : f === 'falta' ? 'Me falta' : 'Repetidas'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Groups */}
+      <div className="px-3 pt-3 flex flex-col gap-3">
+        {GROUPS.map(g => {
+          const gc = GROUP_COLORS[g.name] || GROUP_COLORS['Especiales']
+          const gid = g.name.replace(/\s/g, '')
+          const teamEntries = Object.entries(g.teams)
+
+          // Check if group has anything visible
+          const hasVisible = teamEntries.some(([team, count]) =>
+            Array.from({ length: count }, (_, i) => i + 1).some(n => isVisible(team, n))
+          )
+          if ((search || curFilter !== 'all') && !hasVisible) return null
+
+          const gTotal = teamEntries.reduce((a, [, c]) => a + c, 0)
+          const gHave = teamEntries.reduce((a, [team, count]) =>
+            a + Array.from({ length: count }, (_, i) => i + 1).filter(n => (state[stateKey(team, n)] || 0) >= 1).length, 0)
+          const pct = Math.round(gHave / gTotal * 100)
+
+          return (
+            <div key={g.name} className="rounded-xl border overflow-hidden" style={{ borderColor: gc.border }}>
+              {/* Group header */}
+              <button
+                onClick={() => setCollapsed(c => ({ ...c, [gid]: !c[gid] }))}
+                className="w-full flex items-center justify-between px-4 py-2.5"
+                style={{ background: gc.bg }}
+              >
+                <span className="text-sm font-semibold" style={{ color: gc.text }}>{g.name}</span>
+                <span className="text-xs" style={{ color: gc.text }}>{gHave}/{gTotal}</span>
+              </button>
+              {/* Progress bar */}
+              <div className="h-1 bg-gray-100">
+                <div className="h-1 transition-all" style={{ width: `${pct}%`, background: gc.bar }} />
+              </div>
+
+              {!collapsed[gid] && (
+                <div className="flex flex-wrap gap-4 p-3 justify-center">
+                  {teamEntries.map(([team, count]) => {
+                    const nums = Array.from({ length: count }, (_, i) => i + 1)
+                    const visibleNums = nums.filter(n => isVisible(team, n))
+                    if ((search || curFilter !== 'all') && visibleNums.length === 0) return null
+                    const iso = TEAM_ISO[team]
+                    const grad = TEAM_GRAD[team] || 'linear-gradient(135deg,#374151,#1f2937)'
+
+                    return (
+                      <div key={team} className="flex flex-col items-center gap-1.5">
+                        <div className="flex items-center gap-1.5">
+                          {iso && <img src={`https://flagicons.lipis.dev/flags/4x3/${iso}.svg`} className="w-4 h-3 rounded-sm object-cover" alt={team} onError={e => (e.currentTarget.style.display='none')} />}
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">{team} — {TEAM_FULL[team]}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 justify-start">
+                          {nums.map(n => {
+                            if ((search || curFilter !== 'all') && !isVisible(team, n)) return null
+                            const k = stateKey(team, n)
+                            const v = state[k] || 0
+                            const isTengo = v >= 1
+                            const isRep = v >= 2
+                            const rep = v - 1
+
+                            return (
+                              <div
+                                key={n}
+                                onClick={() => toggleSticker(team, n)}
+                                title={`${team} ${n}${PLAYERS[team]?.[n] ? ' — ' + PLAYERS[team][n] : ''}`}
+                                className="relative flex flex-col items-center justify-end overflow-hidden cursor-default transition-all duration-150"
+                                style={{
+                                  width: 'clamp(70px, calc((100vw - 80px) / 4), 90px)',
+                                  height: 'clamp(98px, calc((100vw - 80px) / 4 * 1.4), 126px)',
+                                  borderRadius: 10,
+                                  background: grad,
+                                  border: isTengo
+                                    ? isRep ? '3px solid #d97706' : '3px solid #16a34a'
+                                    : '2px solid rgba(0,0,0,0.08)',
+                                  boxShadow: isTengo
+                                    ? isRep ? '0 0 0 1px #d97706, 0 3px 10px rgba(217,119,6,0.25)' : '0 0 0 1px #16a34a, 0 3px 10px rgba(22,163,74,0.2)'
+                                    : '0 1px 3px rgba(0,0,0,0.1)',
+                                  filter: isTengo ? 'none' : 'brightness(0.55) saturate(0.15) grayscale(0.4)',
+                                  cursor: editMode ? 'pointer' : 'default',
+                                }}
+                              >
+                                {/* Check */}
+                                {isTengo && !isRep && (
+                                  <span className="absolute top-1 right-1.5 text-green-300 text-xs font-black" style={{ textShadow: '0 0 6px rgba(74,222,128,0.8)' }}>✓</span>
+                                )}
+                                {/* Rep badge */}
+                                {isRep && (
+                                  <span className="absolute top-0 right-0 bg-amber-400 text-black text-[9px] font-black px-1 py-0.5" style={{ borderRadius: '0 9px 0 6px' }}>x{rep}</span>
+                                )}
+                                {/* Rep button */}
+                                {editMode && isTengo && (
+                                  <button
+                                    onClick={e => handleRepBtn(team, n, e)}
+                                    className="absolute top-1.5 left-1.5 bg-black/60 text-amber-300 text-[9px] font-black px-1.5 py-0.5 rounded-md border border-amber-500/70 z-10"
+                                    style={{ lineHeight: 1 }}
+                                  >
+                                    {isRep ? `+${rep}` : '+'}
+                                  </button>
+                                )}
+                                {/* Num top (no photo) */}
+                                {!isTengo && (
+                                  <span className="absolute top-1 left-1.5 text-white text-xs font-black" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>{n}</span>
+                                )}
+                                {/* Band */}
+                                <div className="relative z-10 w-full flex flex-col items-center gap-0.5 pb-1.5 pt-3"
+                                  style={{ background: 'linear-gradient(0deg,rgba(0,0,0,0.85) 0%,rgba(0,0,0,0.6) 60%,transparent 100%)' }}>
+                                  <span className="text-white font-black leading-none" style={{ fontSize: 18, letterSpacing: -1, textShadow: '0 1px 5px rgba(0,0,0,0.6)' }}>{n}</span>
+                                  {PLAYERS[team]?.[n] && (
+                                    <span className="text-white/90 font-semibold text-center leading-tight" style={{ fontSize: 6.5, maxWidth: 54, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textShadow: '0 1px 2px rgba(0,0,0,0.9)' }}>
+                                      {PLAYERS[team][n]}
+                                    </span>
+                                  )}
+                                  <div className="flex items-center gap-1">
+                                    {iso && <img src={`https://flagicons.lipis.dev/flags/4x3/${iso}.svg`} className="object-cover rounded-sm" style={{ width: 14, height: 10 }} alt="" onError={e => (e.currentTarget.style.display='none')} />}
+                                    <span className="text-white/80 font-bold uppercase" style={{ fontSize: 6.5, letterSpacing: '0.06em' }}>{team}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Bottom Nav */}
+      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-gray-100 flex items-center justify-around px-4 z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+        <button
+          onClick={() => setEditMode(e => !e)}
+          className={`flex flex-col items-center gap-1 px-5 py-2 rounded-xl transition ${editMode ? 'bg-amber-50' : 'hover:bg-gray-50'}`}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={editMode ? '#b45309' : '#6b7280'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+          <span className={`text-[10px] font-semibold ${editMode ? 'text-amber-700' : 'text-gray-500'}`}>Editar</span>
+        </button>
+
+        {/* Scan button */}
+        <button
+          onClick={() => setShowScanner(true)}
+          className="w-14 h-14 rounded-full bg-gray-900 flex items-center justify-center shadow-lg hover:bg-gray-700 transition -mt-5"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+            <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+            <line x1="8" y1="12" x2="16" y2="12"/>
+          </svg>
+        </button>
+
+        {/* Menu */}
+        <div className="relative">
+          <button onClick={() => setShowMenu(m => !m)} className="flex flex-col items-center gap-1 px-5 py-2 rounded-xl hover:bg-gray-50 transition">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+            <span className="text-[10px] font-semibold text-gray-500">Menú</span>
+          </button>
+          {showMenu && (
+            <div className="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[180px] animate-pop">
+              <button onClick={() => { exportFaltantes(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">Exportar faltantes ↗</button>
+              <button onClick={() => { exportRepetidas(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">Exportar repetidas ↗</button>
+              <div className="h-px bg-gray-100" />
+              <button onClick={logout} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 text-gray-500">Cerrar sesión</button>
+              <div className="h-px bg-gray-100" />
+              <button onClick={() => { if (confirm('¿Reiniciar todo el álbum?') && confirm('¿Estás seguro?')) resetAll(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50">Reiniciar álbum</button>
+            </div>
+          )}
+        </div>
+      </nav>
+
+      {/* Click outside menu */}
+      {showMenu && <div className="fixed inset-0 z-20" onClick={() => setShowMenu(false)} />}
+
+      {/* Rep Popover */}
+      {repPopover && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setRepPopover(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl p-5 flex flex-col items-center gap-3 min-w-[200px] animate-pop" onClick={e => e.stopPropagation()}>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Repetidas</div>
+            <div className="text-sm font-semibold text-gray-900 text-center max-w-[160px] truncate">
+              {repPopover.team} {repPopover.num}{PLAYERS[repPopover.team]?.[repPopover.num] ? ' — ' + PLAYERS[repPopover.team][repPopover.num] : ''}
+            </div>
+            <div className="flex items-center gap-4">
+              <button onClick={() => changeRep(-1)} className="w-12 h-12 rounded-xl border border-red-200 bg-red-50 text-red-700 text-2xl font-bold hover:bg-red-100 transition">−</button>
+              <div className="flex flex-col items-center">
+                <span className="text-3xl font-black text-gray-900">{repCount}</span>
+                <span className="text-xs text-gray-400">repetidas</span>
+              </div>
+              <button onClick={() => changeRep(+1)} className="w-12 h-12 rounded-xl border border-green-200 bg-green-50 text-green-700 text-2xl font-bold hover:bg-green-100 transition">+</button>
+            </div>
+            <button onClick={() => setRepPopover(null)} className="text-xs text-gray-400 border border-gray-200 px-4 py-1.5 rounded-lg hover:bg-gray-50">Listo</button>
+          </div>
+        </div>
+      )}
+
+      {/* Scanner */}
+      {showScanner && (
+        <Scanner state={state} onConfirm={handleScanConfirm} onClose={() => setShowScanner(false)} />
+      )}
+    </div>
+  )
+
+  function exportFaltantes() {
+    const lines = ['FIGURITAS QUE ME FALTAN - Copa 2026\n']
+    GROUPS.forEach(g => {
+      const grupo: string[] = []
+      Object.entries(g.teams).forEach(([t, c]) => {
+        const f = Array.from({length:c},(_,i)=>i+1).filter(n=>!(state[stateKey(t,n)])).map(n=>`${t} ${n}`)
+        if (f.length) grupo.push(f.join(', '))
+      })
+      if (grupo.length) lines.push(`${g.name}:\n${grupo.join('\n')}`)
+    })
+    navigator.clipboard.writeText(lines.join('\n')).then(() => alert('Lista copiada!'))
+  }
+
+  function exportRepetidas() {
+    const lines = ['FIGURITAS REPETIDAS - Copa 2026\n']
+    GROUPS.forEach(g => {
+      const rep: string[] = []
+      Object.entries(g.teams).forEach(([t, c]) => {
+        Array.from({length:c},(_,i)=>i+1).forEach(n => {
+          const v = state[stateKey(t,n)] || 0
+          if (v >= 2) rep.push(`${t} ${n} x${v-1}`)
+        })
+      })
+      if (rep.length) lines.push(`${g.name}:\n${rep.join(', ')}`)
+    })
+    navigator.clipboard.writeText(lines.join('\n')).then(() => alert('Lista copiada!'))
+  }
+
+  async function resetAll() {
+    setState({})
+    await fetch('/api/figuritas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reset: true })
+    })
+  }
+}
