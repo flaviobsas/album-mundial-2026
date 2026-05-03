@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
+import { createServerClient, type CookieMethodsServer } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 async function getSupabase() {
@@ -9,9 +9,15 @@ async function getSupabase() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: (cs: {name:string;value:string;options?:object}[]) => { try { cs.forEach(({ name, value, options }) => cookieStore.set(name, value, options as never)) } catch {} }
-      }
+        getAll() { return cookieStore.getAll() },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            )
+          } catch {}
+        },
+      } satisfies CookieMethodsServer,
     }
   )
 }
@@ -22,7 +28,9 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { data } = await supabase.from('figuritas').select('team, num, valor').eq('user_id', user.id)
   const state: Record<string, number> = {}
-  data?.forEach((r: {team:string,num:number,valor:number}) => { state[`${r.team}_${r.num}`] = r.valor })
+  data?.forEach((r: { team: string; num: number; valor: number }) => {
+    state[`${r.team}_${r.num}`] = r.valor
+  })
   return NextResponse.json({ state })
 }
 
