@@ -10,7 +10,7 @@ async function getSupabase() {
     {
       cookies: {
         getAll: () => cookieStore.getAll(),
-        setAll: (cs) => { try { cs.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) } catch {} }
+        setAll: (cs: {name:string;value:string;options?:object}[]) => { try { cs.forEach(({ name, value, options }) => cookieStore.set(name, value, options as never)) } catch {} }
       }
     }
   )
