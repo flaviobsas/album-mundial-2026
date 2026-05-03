@@ -1,36 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient, type CookieMethodsServer } from '@supabase/ssr'
+import { createClient } from '@supabase/supabase-js'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url)
-  const code = searchParams.get('code')
-  const next = searchParams.get('next') ?? '/'
+  const requestUrl = new URL(request.url)
+  const code = requestUrl.searchParams.get('code')
+  const origin = requestUrl.origin
 
   if (code) {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() { return cookieStore.getAll() },
-          setAll(cookiesToSet) {
-            try {
-              cookiesToSet.forEach(({ name, value, options }) =>
-                cookieStore.set(name, value, options)
-              )
-            } catch {}
+    try {
+      const cookieStore = await cookies()
+      const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          cookies: {
+            getAll() {
+              return cookieStore.getAll()
+            },
+            setAll(cookiesToSet) {
+              cookiesToSet.forEach(({ name, value, options }) => {
+                try {
+                  cookieStore.set(name, value, options)
+                } catch {}
+              })
+            },
           },
-        } satisfies CookieMethodsServer,
-      }
-    )
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error) {
-      return NextResponse.redirect(`${origin}${next}`)
+        }
+      )
+      await supabase.auth.exchangeCodeForSession(code)
+    } catch (error) {
+      console.error('Auth callback error:', error)
     }
   }
 
-  // Si hay error, redirigir igual a home
-  return NextResponse.redirect(`${origin}/`)
+  return NextResponse.redirect(origin)
 }
