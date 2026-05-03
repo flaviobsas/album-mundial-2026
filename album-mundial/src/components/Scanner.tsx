@@ -33,19 +33,27 @@ export default function Scanner({ state, onConfirm, onClose }: ScannerProps) {
   const [ocrReady, setOcrReady] = useState(false)
 
   const parseText = (text: string): ScanResult | null => {
-    const upper = text.toUpperCase().replace(/[^A-Z0-9\s\n]/g, ' ')
+    // Corregir errores comunes de OCR
+    let upper = text.toUpperCase()
+    upper = upper.replace(/0/g, 'O').replace(/1/g, 'I') // primer pase: números a letras para encontrar el equipo
+    
+    // Buscar equipo primero
     for (const team of TEAMS) {
-      const patterns = [
-        new RegExp(`\\b${team}\\s*(\\d{1,2})\\b`),
-        new RegExp(`${team}(\\d{1,2})`),
-      ]
-      for (const pat of patterns) {
-        const m = upper.match(pat)
-        if (m) {
-          const num = parseInt(m[1])
-          const groupEntry = GROUPS.flatMap(g => Object.entries(g.teams)).find(([t]) => t === team)
-          if (groupEntry && num >= 1 && num <= groupEntry[1]) {
-            return { team, num }
+      if (upper.includes(team)) {
+        // Encontrado el equipo — ahora buscar el número en el texto original
+        const numText = text.toUpperCase().replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
+        const patterns = [
+          new RegExp(`\\b${team}\\s*(\\d{1,2})\\b`),
+          new RegExp(`${team}\\D{0,3}(\\d{1,2})`),
+        ]
+        for (const pat of patterns) {
+          const m = numText.match(pat)
+          if (m) {
+            const num = parseInt(m[1])
+            const groupEntry = GROUPS.flatMap(g => Object.entries(g.teams)).find(([t]) => t === team)
+            if (groupEntry && num >= 1 && num <= groupEntry[1]) {
+              return { team, num }
+            }
           }
         }
       }
@@ -89,16 +97,20 @@ export default function Scanner({ state, onConfirm, onClose }: ScannerProps) {
     setAttempts(a => a + 1)
 
     try {
-      // Capturar frame
+      // Capturar frame — recortar zona central donde está el código
       const canvas = document.createElement('canvas')
-      // Escalar para mejor OCR — más grande es mejor para texto pequeño
-      const scale = Math.min(2, 1200 / Math.max(video.videoWidth, video.videoHeight))
-      canvas.width = Math.round(video.videoWidth * scale)
-      canvas.height = Math.round(video.videoHeight * scale)
+      const cw = video.videoWidth, ch = video.videoHeight
+      // Recortar el área del marco (zona central)
+      const cropW = Math.round(cw * 0.6)
+      const cropH = Math.round(ch * 0.5)
+      const cropX = Math.round((cw - cropW) / 2)
+      const cropY = Math.round((ch - cropH) / 2)
+      // Escalar grande para mejor OCR
+      canvas.width = cropW * 2
+      canvas.height = cropH * 2
       const ctx = canvas.getContext('2d')!
-      // Preprocesar imagen para mejor OCR
-      ctx.filter = 'contrast(2) brightness(1.2) grayscale(1)'
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      ctx.filter = 'contrast(2.5) brightness(1.3) grayscale(1)'
+      ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height)
 
       const worker = workerRef.current as {
         recognize: (img: HTMLCanvasElement) => Promise<{data: {text: string}}>
@@ -107,7 +119,7 @@ export default function Scanner({ state, onConfirm, onClose }: ScannerProps) {
 
       await worker.setParameters({
         tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ',
-        tessedit_pageseg_mode: '6',
+        tessedit_pageseg_mode: '11', // modo esparso — busca texto en cualquier lugar
       })
 
       const { data: { text } } = await worker.recognize(canvas)
