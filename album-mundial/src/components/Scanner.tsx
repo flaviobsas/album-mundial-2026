@@ -21,13 +21,15 @@ export default function Scanner({ state, onConfirm, onClose }: ScannerProps) {
   const [statusType, setStatusType] = useState<'idle'|'processing'|'success'|'error'>('idle')
   const [result, setResult] = useState<ScanResult | null>(null)
   const [attempts, setAttempts] = useState(0)
+  const [lastError, setLastError] = useState('')
 
   const setMsg = (msg: string, type: typeof statusType) => {
     setStatus(msg); setStatusType(type)
   }
 
   const parseResult = (text: string): ScanResult | null => {
-    const m = text.match(/\b([A-Z]{2,3})\s*(\d{1,2})\b/)
+    const clean = text.replace(/[^A-Z0-9\s]/g, '').trim()
+    const m = clean.match(/\b([A-Z]{2,3})\s*(\d{1,2})\b/)
     if (!m) return null
     const team = m[1], num = parseInt(m[2])
     if (!PLAYERS[team]) return null
@@ -44,23 +46,39 @@ export default function Scanner({ state, onConfirm, onClose }: ScannerProps) {
     scanningRef.current = true
     setAttempts(a => a + 1)
 
-    const canvas = document.createElement('canvas')
-    const scale = Math.min(1, 800 / Math.max(video.videoWidth, video.videoHeight))
-    canvas.width = Math.round(video.videoWidth * scale)
-    canvas.height = Math.round(video.videoHeight * scale)
-    const ctx = canvas.getContext('2d')!
-    ctx.filter = 'contrast(1.3) brightness(1.1)'
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-    const base64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1]
-
     try {
+      const canvas = document.createElement('canvas')
+      const scale = Math.min(1, 800 / Math.max(video.videoWidth, video.videoHeight))
+      canvas.width = Math.round(video.videoWidth * scale)
+      canvas.height = Math.round(video.videoHeight * scale)
+      const ctx = canvas.getContext('2d')!
+      ctx.filter = 'contrast(1.3) brightness(1.1)'
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
+
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: base64 })
       })
+
+      if (!res.ok) {
+        const err = await res.text()
+        setLastError(`Error ${res.status}: ${err}`)
+        scanningRef.current = false
+        return
+      }
+
       const data = await res.json()
+
+      if (data.error) {
+        setLastError(data.error)
+        scanningRef.current = false
+        return
+      }
+
       const text = (data.text || '').trim().toUpperCase()
+      setLastError(`Leyó: "${text}"`)
 
       if (text && text !== 'NONE') {
         const parsed = parseResult(text)
@@ -68,9 +86,13 @@ export default function Scanner({ state, onConfirm, onClose }: ScannerProps) {
           if (intervalRef.current) clearInterval(intervalRef.current)
           setResult(parsed)
           setMsg('¡Figurita detectada!', 'success')
+        } else {
+          setLastError(`Leyó "${text}" pero no coincide con ninguna figurita`)
         }
       }
-    } catch {}
+    } catch (e) {
+      setLastError(`Exception: ${e}`)
+    }
 
     scanningRef.current = false
   }, [])
@@ -91,7 +113,7 @@ export default function Scanner({ state, onConfirm, onClose }: ScannerProps) {
           await videoRef.current.play()
         }
         setMsg('Apuntá al número de la figurita', 'idle')
-        intervalRef.current = setInterval(captureAndScan, 2500)
+        intervalRef.current = setInterval(captureAndScan, 3000)
         return
       } catch {}
     }
@@ -115,16 +137,18 @@ export default function Scanner({ state, onConfirm, onClose }: ScannerProps) {
     if (!result) return
     onConfirm(result.team, result.num)
     setResult(null)
+    setLastError('')
     setMsg('Apuntá al número de la figurita', 'idle')
     scanningRef.current = false
-    intervalRef.current = setInterval(captureAndScan, 2500)
+    intervalRef.current = setInterval(captureAndScan, 3000)
   }
 
   const handleRetry = () => {
     setResult(null)
+    setLastError('')
     setMsg('Apuntá al número de la figurita', 'idle')
     scanningRef.current = false
-    intervalRef.current = setInterval(captureAndScan, 2500)
+    intervalRef.current = setInterval(captureAndScan, 3000)
   }
 
   const playerName = result ? (PLAYERS[result.team]?.[result.num] || '') : ''
@@ -137,43 +161,40 @@ export default function Scanner({ state, onConfirm, onClose }: ScannerProps) {
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-2">
       <div className="bg-white rounded-2xl overflow-hidden w-full max-w-sm flex flex-col max-h-[92vh]">
-        {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900">📷 Escanear figurita</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200">✕</button>
         </div>
 
-        {/* Video */}
         <div className="relative bg-black" style={{ aspectRatio: '3/4' }}>
           <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-          {/* Marco */}
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="relative" style={{ width: 160, height: 200 }}>
               <div className="absolute inset-0 rounded-xl" style={{ boxShadow: '0 0 0 1000px rgba(0,0,0,0.5)', border: '2px solid rgba(255,255,255,0.8)', borderRadius: 12 }} />
-              {/* Esquinas verdes */}
               <div className="absolute top-0 left-0 w-6 h-6 border-l-[3px] border-t-[3px] border-green-400 rounded-tl-lg" />
               <div className="absolute bottom-0 right-0 w-6 h-6 border-r-[3px] border-b-[3px] border-green-400 rounded-br-lg" />
             </div>
           </div>
-          {/* Hint */}
           <div className="absolute bottom-3 left-0 right-0 flex items-center justify-center gap-2 text-white/90 text-xs font-medium">
-            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse-dot" />
-            Intento {attempts} · Escaneando...
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            Intento {attempts}
           </div>
         </div>
 
-        {/* Body */}
-        <div className="p-4 flex flex-col gap-3">
-          {/* Status */}
+        <div className="p-4 flex flex-col gap-2">
           <p className={`text-sm text-center font-medium ${
             statusType === 'success' ? 'text-green-600' :
             statusType === 'error' ? 'text-red-600' :
             statusType === 'processing' ? 'text-amber-600' : 'text-gray-500'
           }`}>{status}</p>
 
-          {/* Resultado */}
+          {/* Debug info */}
+          {lastError && (
+            <p className="text-xs text-center text-gray-400 bg-gray-50 rounded-lg p-2">{lastError}</p>
+          )}
+
           {result && (
-            <div className="rounded-xl border border-gray-200 overflow-hidden animate-pop">
+            <div className="rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-4 py-3">
                 <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Figurita detectada</div>
                 <div className="text-base font-bold text-gray-900">{result.team} {result.num}{playerName ? ` — ${playerName}` : ''}</div>
@@ -186,7 +207,6 @@ export default function Scanner({ state, onConfirm, onClose }: ScannerProps) {
             </div>
           )}
 
-          {/* Botón manual */}
           {!result && (
             <button onClick={handleManual} className="w-full py-3.5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition">
               📷 Capturar ahora
