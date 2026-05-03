@@ -34,7 +34,7 @@ export default function Album({ user }: { user: User }) {
   const [showMenu, setShowMenu] = useState(false)
   const [repPopover, setRepPopover] = useState<{ team: string; num: number } | null>(null)
   const [photoCache, setPhotoCache] = useState<Record<string, string>>({})
-  const saveTimeout = useRef<NodeJS.Timeout>()
+ const saveTimeout = useRef<NodeJS.Timeout | undefined>(undefined)
 
   // ── Cargar state desde API ──
   useEffect(() => {
