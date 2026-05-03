@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient, type CookieMethodsServer } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+
+type CookieToSet = { name: string; value: string; options?: Record<string, unknown> }
 
 async function getSupabase() {
   const cookieStore = await cookies()
@@ -10,14 +12,14 @@ async function getSupabase() {
     {
       cookies: {
         getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            )
-          } catch {}
+        setAll(cookiesToSet: CookieToSet[]) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            try {
+              cookieStore.set(name, value, options as Parameters<typeof cookieStore.set>[2])
+            } catch {}
+          })
         },
-      } satisfies CookieMethodsServer,
+      },
     }
   )
 }
