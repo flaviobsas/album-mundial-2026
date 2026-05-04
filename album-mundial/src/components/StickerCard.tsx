@@ -72,12 +72,11 @@ interface StickerCardProps {
   team: string
   num: number
   valor: number
-  editMode: boolean
   onClick: () => void
   onRepClick: (e: React.MouseEvent) => void
 }
 
-export default function StickerCard({ team, num, valor, editMode, onClick, onRepClick }: StickerCardProps) {
+export default function StickerCard({ team, num, valor, onClick, onRepClick }: StickerCardProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [photoLoaded, setPhotoLoaded] = useState(false)
@@ -125,7 +124,7 @@ export default function StickerCard({ team, num, valor, editMode, onClick, onRep
           ? isRep ? '0 0 0 1px #d97706, 0 3px 10px rgba(217,119,6,0.25)' : '0 0 0 1px #16a34a, 0 3px 10px rgba(22,163,74,0.2)'
           : '0 1px 3px rgba(0,0,0,0.1)',
         filter: isTengo ? 'none' : 'brightness(0.55) saturate(0.15) grayscale(0.4)',
-        cursor: editMode ? 'pointer' : 'default',
+        cursor: 'pointer',
       }}
     >
       {/* Foto de jugador */}
@@ -147,7 +146,7 @@ export default function StickerCard({ team, num, valor, editMode, onClick, onRep
       {isRep && (
         <span className="absolute top-0 right-0 bg-amber-400 text-black text-[9px] font-black px-1 py-0.5 z-10" style={{ borderRadius: '0 9px 0 6px' }}>x{rep}</span>
       )}
-      {editMode && isTengo && (
+      {isTengo && (
         <button
           onClick={onRepClick}
           className="absolute top-1.5 left-1.5 bg-black/60 text-amber-300 text-[9px] font-black px-1.5 py-0.5 rounded-md border border-amber-500/70 z-10"

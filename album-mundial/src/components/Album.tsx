@@ -29,12 +29,12 @@ export default function Album({ user }: { user: User }) {
   const supabase = createClient()
   const [state, setState] = useState<StickerState>({})
   const [saveStatus, setSaveStatus] = useState<'saved'|'saving'|'error'>('saved')
-  const [editMode, setEditMode] = useState(false)
   const [curFilter, setCurFilter] = useState<'all'|'tengo'|'falta'|'repetida'>('all')
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [showScanner, setShowScanner] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
+  const [showShare, setShowShare] = useState(false)
   const [repPopover, setRepPopover] = useState<{ team: string; num: number } | null>(null)
   const [scannedResult, setScannedResult] = useState<ScannedResult | null>(null)
   // Carga rápida
@@ -67,7 +67,6 @@ export default function Album({ user }: { user: User }) {
   const stateKey = (t: string, n: number) => `${t}_${n}`
 
   const toggleSticker = (team: string, num: number) => {
-    if (!editMode) return
     const k = stateKey(team, num)
     const v = state[k] || 0
     const newVal = v === 0 ? 1 : 0
@@ -81,7 +80,6 @@ export default function Album({ user }: { user: User }) {
 
   const handleRepBtn = (team: string, num: number, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!editMode) return
     const k = stateKey(team, num)
     const v = state[k] || 0
     const rep = v - 1
@@ -188,25 +186,41 @@ export default function Album({ user }: { user: User }) {
     <div className="max-w-5xl mx-auto pb-24">
       {/* Header */}
       <div className="sticky top-0 z-40 bg-white border-b border-gray-100 px-4 py-3">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-bold text-gray-900">Álbum Copa 2026 🏆</h1>
             <p className={`text-xs mt-0.5 ${saveStatus === 'saved' ? 'text-green-600' : saveStatus === 'error' ? 'text-red-500' : 'text-amber-500'}`}>
               {saveStatus === 'saved' ? '● Guardado' : saveStatus === 'saving' ? '● Guardando...' : '● Error al guardar'}
             </p>
           </div>
-          <div className="flex gap-2 flex-wrap">
-            {[
-              { label: 'Total', val: total, cls: 'text-gray-900' },
-              { label: 'Tengo', val: tengo, cls: 'text-green-600' },
-              { label: 'Falta', val: total - tengo, cls: 'text-red-500' },
-              { label: 'Rep.', val: repetidas, cls: 'text-amber-500' },
-            ].map(s => (
-              <div key={s.label} className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-center min-w-[60px]">
-                <div className={`text-lg font-bold ${s.cls}`}>{s.val}</div>
-                <div className="text-[10px] text-gray-400 uppercase tracking-wide">{s.label}</div>
-              </div>
-            ))}
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1.5">
+              {[
+                { label: 'Tengo', val: tengo, cls: 'text-green-600' },
+                { label: 'Falta', val: total - tengo, cls: 'text-red-500' },
+                { label: 'Rep.', val: repetidas, cls: 'text-amber-500' },
+              ].map(s => (
+                <div key={s.label} className="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-center min-w-[44px]">
+                  <div className={`text-sm font-bold ${s.cls}`}>{s.val}</div>
+                  <div className="text-[9px] text-gray-400 uppercase tracking-wide">{s.label}</div>
+                </div>
+              ))}
+            </div>
+            {/* Menú hamburguesa arriba */}
+            <div className="relative">
+              <button onClick={() => setShowMenu(m => !m)} className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2.5" strokeLinecap="round">
+                  <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                </svg>
+              </button>
+              {showMenu && (
+                <div className="absolute top-11 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[180px] z-50">
+                  <button onClick={logout} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 text-gray-600">Cerrar sesión</button>
+                  <div className="h-px bg-gray-100" />
+                  <button onClick={() => { if (confirm('¿Reiniciar todo el álbum?') && confirm('¿Estás seguro?')) resetAll(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50">Reiniciar álbum</button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -290,7 +304,6 @@ export default function Album({ user }: { user: User }) {
                                 team={team}
                                 num={n}
                                 valor={v}
-                                editMode={editMode}
                                 onClick={() => toggleSticker(team, n)}
                                 onRepClick={(e) => handleRepBtn(team, n, e)}
                               />
@@ -308,18 +321,19 @@ export default function Album({ user }: { user: User }) {
       </div>
 
       {/* Bottom Nav */}
-      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-gray-100 flex items-center justify-around px-4 z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-gray-100 flex items-center justify-around px-6 z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+        {/* Carga rápida */}
         <button
-          onClick={() => setEditMode(e => !e)}
-          className={`flex flex-col items-center gap-1 px-5 py-2 rounded-xl transition ${editMode ? 'bg-amber-50' : 'hover:bg-gray-50'}`}
+          onClick={() => setShowQuickLoad(true)}
+          className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl hover:bg-gray-50 transition"
         >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={editMode ? '#b45309' : '#6b7280'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
           </svg>
-          <span className={`text-[10px] font-semibold ${editMode ? 'text-amber-700' : 'text-gray-500'}`}>Editar</span>
+          <span className="text-[10px] font-semibold text-gray-500">Carga rápida</span>
         </button>
 
+        {/* Escáner — centro */}
         <button
           onClick={() => setShowScanner(true)}
           className="w-14 h-14 rounded-full bg-gray-900 flex items-center justify-center shadow-lg hover:bg-gray-700 transition -mt-5"
@@ -331,30 +345,39 @@ export default function Album({ user }: { user: User }) {
           </svg>
         </button>
 
-        <div className="relative">
-          <button onClick={() => setShowMenu(m => !m)} className="flex flex-col items-center gap-1 px-5 py-2 rounded-xl hover:bg-gray-50 transition">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-            </svg>
-            <span className="text-[10px] font-semibold text-gray-500">Menú</span>
-          </button>
-          {showMenu && (
-            <div className="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[180px]">
-              <button onClick={() => { setShowQuickLoad(true); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 font-medium text-gray-900">⚡ Carga rápida</button>
-              <div className="h-px bg-gray-100" />
-              <button onClick={() => { exportTengo(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">📩 Compartir las que tengo</button>
-              <button onClick={() => { exportFaltantes(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">📩 Compartir faltantes</button>
-              <button onClick={() => { exportRepetidas(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">📩 Compartir repetidas</button>
-              <div className="h-px bg-gray-100" />
-              <button onClick={logout} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 text-gray-500">Cerrar sesión</button>
-              <div className="h-px bg-gray-100" />
-              <button onClick={() => { if (confirm('¿Reiniciar todo el álbum?') && confirm('¿Estás seguro?')) resetAll(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50">Reiniciar álbum</button>
-            </div>
-          )}
-        </div>
+        {/* Compartir */}
+        <button
+          onClick={() => setShowShare(s => !s)}
+          className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl hover:bg-gray-50 transition"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+            <polyline points="16 6 12 2 8 6"/>
+            <line x1="12" y1="2" x2="12" y2="15"/>
+          </svg>
+          <span className="text-[10px] font-semibold text-gray-500">Compartir</span>
+        </button>
       </nav>
 
-      {showMenu && <div className="fixed inset-0 z-20" onClick={() => setShowMenu(false)} />}
+      {/* Panel compartir */}
+      {showShare && (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40" onClick={() => setShowShare(false)}>
+          <div className="bg-white rounded-t-2xl w-full max-w-md p-5 flex flex-col gap-2" onClick={e => e.stopPropagation()}>
+            <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-2" />
+            <button onClick={() => { exportTengo(); setShowShare(false) }} className="w-full text-left px-4 py-3.5 text-sm font-medium rounded-xl hover:bg-gray-50 flex items-center gap-3">
+              <span className="text-xl">📋</span> Las que tengo
+            </button>
+            <button onClick={() => { exportFaltantes(); setShowShare(false) }} className="w-full text-left px-4 py-3.5 text-sm font-medium rounded-xl hover:bg-gray-50 flex items-center gap-3">
+              <span className="text-xl">🔍</span> Las que me faltan
+            </button>
+            <button onClick={() => { exportRepetidas(); setShowShare(false) }} className="w-full text-left px-4 py-3.5 text-sm font-medium rounded-xl hover:bg-gray-50 flex items-center gap-3">
+              <span className="text-xl">🔁</span> Las repetidas
+            </button>
+            <div className="h-px bg-gray-100 my-1" />
+            <button onClick={() => setShowShare(false)} className="w-full text-center px-4 py-3 text-sm text-gray-400 rounded-xl hover:bg-gray-50">Cancelar</button>
+          </div>
+        </div>
+      )}
 
       {/* Rep Popover */}
       {repPopover && (
