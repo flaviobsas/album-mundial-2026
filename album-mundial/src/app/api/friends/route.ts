@@ -80,8 +80,8 @@ export async function GET() {
       figuritas: friendFiguritas[id] || {}
     })),
     pendingReceived: pendingReceivedIds.map(p => ({
-      friendshipId: p.id,
-      ...profiles[p.id]
+      ...profiles[p.id],
+      friendshipId: p.friendshipId,
     })),
     pendingSent: pendingSentIds.map(id => profiles[id]).filter(Boolean)
   })
