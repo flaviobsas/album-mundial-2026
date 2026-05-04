@@ -6,5 +6,13 @@ export default async function Home() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return <Login />
-  return <Album user={user} />
+
+  // Verificar si tiene perfil
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('id', user.id)
+    .single()
+
+  return <Album user={user} hasProfile={!!profile} />
 }

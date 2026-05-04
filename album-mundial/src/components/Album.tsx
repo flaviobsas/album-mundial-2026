@@ -7,6 +7,7 @@ import type { StickerState } from '@/lib/data'
 import Scanner from './Scanner'
 import StickerCard from './StickerCard'
 import Friends from './Friends'
+import Onboarding from './Onboarding'
 
 const GROUP_COLORS: Record<string, { bg: string; text: string; bar: string; border: string }> = {
   'Grupo A': { bg:'#fef2f2', text:'#991b1b', bar:'#ef4444', border:'#fca5a5' },
@@ -26,8 +27,9 @@ const GROUP_COLORS: Record<string, { bg: string; text: string; bar: string; bord
 
 interface ScannedResult { team: string; num: number }
 
-export default function Album({ user }: { user: User }) {
+export default function Album({ user, hasProfile }: { user: User; hasProfile: boolean }) {
   const supabase = createClient()
+  const [profileComplete, setProfileComplete] = useState(hasProfile)
   const [state, setState] = useState<StickerState>({})
   const [saveStatus, setSaveStatus] = useState<'saved'|'saving'|'error'>('saved')
   const [curFilter, setCurFilter] = useState<'all'|'tengo'|'falta'|'repetida'>('all')
@@ -36,6 +38,8 @@ export default function Album({ user }: { user: User }) {
   const [showScanner, setShowScanner] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showShare, setShowShare] = useState(false)
+  const [showFriends, setShowFriends] = useState(false)
+  const [matchCount, setMatchCount] = useState(0)
   const [showFriends, setShowFriends] = useState(false)
   const [matchCount, setMatchCount] = useState(0)
   const [repPopover, setRepPopover] = useState<{ team: string; num: number } | null>(null)
@@ -192,6 +196,10 @@ export default function Album({ user }: { user: User }) {
     : scanV === 1 ? '🔁 Ya la tenés — quedará como repetida x1'
     : `🔁 Ya tenés ${scanV-1} repetida${scanV > 2 ? 's' : ''} — quedará x${scanV}`
 
+  if (!profileComplete) {
+    return <Onboarding user={user} onComplete={() => setProfileComplete(true)} />
+  }
+
   return (
     <div className="max-w-5xl mx-auto pb-24">
       {/* Header */}
@@ -216,20 +224,39 @@ export default function Album({ user }: { user: User }) {
                 </div>
               ))}
             </div>
-            {/* Menú hamburguesa arriba */}
-            <div className="relative">
-              <button onClick={() => setShowMenu(m => !m)} className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2.5" strokeLinecap="round">
-                  <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+            <div className="flex items-center gap-2">
+              {/* Botón amigos */}
+              <button
+                onClick={() => setShowFriends(true)}
+                className="relative w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                  <circle cx="9" cy="7" r="4"/>
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                 </svg>
+                {matchCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                    {matchCount > 9 ? '9+' : matchCount}
+                  </span>
+                )}
               </button>
-              {showMenu && (
-                <div className="absolute top-11 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[180px] z-50">
-                  <button onClick={logout} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 text-gray-600">Cerrar sesión</button>
-                  <div className="h-px bg-gray-100" />
-                  <button onClick={() => { if (confirm('¿Reiniciar todo el álbum?') && confirm('¿Estás seguro?')) resetAll(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50">Reiniciar álbum</button>
-                </div>
-              )}
+              {/* Menú hamburguesa arriba */}
+              <div className="relative">
+                <button onClick={() => setShowMenu(m => !m)} className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2.5" strokeLinecap="round">
+                    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                  </svg>
+                </button>
+                {showMenu && (
+                  <div className="absolute top-11 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[180px] z-50">
+                    <button onClick={logout} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 text-gray-600">Cerrar sesión</button>
+                    <div className="h-px bg-gray-100" />
+                    <button onClick={() => { if (confirm('¿Reiniciar todo el álbum?') && confirm('¿Estás seguro?')) resetAll(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50">Reiniciar álbum</button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -540,6 +567,15 @@ export default function Album({ user }: { user: User }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Amigos */}
+      {showFriends && (
+        <Friends
+          myState={state}
+          onClose={() => setShowFriends(false)}
+          onMatchCount={setMatchCount}
+        />
       )}
 
       {/* Scanner */}

@@ -1,346 +1,379 @@
 'use client'
-import { useState, useEffect } from 'react'
-import { TEAM_FULL, TEAM_ISO, PLAYERS } from '@/lib/data'
-import type { Match } from '@/app/api/matches/route'
+import { useState, useEffect, useCallback } from 'react'
+import { GROUPS, TEAM_FULL, TEAM_ISO, PLAYERS } from '@/lib/data'
+import type { StickerState } from '@/lib/data'
 
-interface Friend { id: string; email: string; name: string; friendship_id: string }
+interface Profile {
+  id: string
+  name: string
+  email: string
+  avatar_url?: string
+  figuritas?: StickerState
+}
 
-export default function Friends({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<'matches'|'friends'>('matches')
+interface PendingFriend {
+  friendshipId: string
+  id: string
+  name: string
+  email: string
+}
+
+interface Match {
+  team: string
+  num: number
+  playerName: string
+  type: 'give' | 'receive' // give: vos tenés repetida, él le falta / receive: él tiene repetida, te falta a vos
+  friendName: string
+  friendId: string
+}
+
+interface FriendsProps {
+  myState: StickerState
+  onClose: () => void
+  onMatchCount?: (count: number) => void
+}
+
+export default function Friends({ myState, onClose, onMatchCount }: FriendsProps) {
+  const [friends, setFriends] = useState<Profile[]>([])
+  const [pendingReceived, setPendingReceived] = useState<PendingFriend[]>([])
+  const [pendingSent, setPendingSent] = useState<Profile[]>([])
   const [matches, setMatches] = useState<Match[]>([])
-  const [friends, setFriends] = useState<Friend[]>([])
-  const [pendingReceived, setPendingReceived] = useState<Friend[]>([])
-  const [pendingSent, setPendingSent] = useState<{id:string,email:string,name:string}[]>([])
-  const [searchEmail, setSearchEmail] = useState('')
-  const [searchResults, setSearchResults] = useState<{id:string,email:string,name:string}[]>([])
-  const [loading, setLoading] = useState(true)
+  const [searchQ, setSearchQ] = useState('')
+  const [searchResults, setSearchResults] = useState<Profile[]>([])
   const [searching, setSearching] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [view, setView] = useState<'matches'|'friends'|'search'>('matches')
 
-  useEffect(() => { loadAll() }, [])
+  const stateKey = (t: string, n: number) => `${t}_${n}`
 
-  async function loadAll() {
+  const loadFriends = useCallback(async () => {
     setLoading(true)
-    const [matchRes, friendRes] = await Promise.all([
-      fetch('/api/matches').then(r => r.json()),
-      fetch('/api/friends').then(r => r.json()),
-    ])
-    setMatches(matchRes.matches || [])
-    setFriends(friendRes.friends || [])
-    setPendingReceived(friendRes.pendingReceived || [])
-    setPendingSent(friendRes.pendingSent || [])
-    setLoading(false)
-  }
-
-  async function search() {
-    if (!searchEmail.trim()) return
-    setSearching(true)
-    const res = await fetch('/api/friends', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'search', email: searchEmail })
-    })
+    const res = await fetch('/api/friends')
     const data = await res.json()
-    setSearchResults(data.results || [])
+    setFriends(data.friends || [])
+    setPendingReceived(data.pendingReceived || [])
+    setPendingSent(data.pendingSent || [])
+
+    // Calcular matches
+    const allMatches: Match[] = []
+    ;(data.friends || []).forEach((friend: Profile) => {
+      if (!friend.figuritas) return
+      const friendState = friend.figuritas
+
+      // Mis repetidas que a él le faltan → puedo darle
+      GROUPS.forEach(g => {
+        Object.entries(g.teams).forEach(([team, count]) => {
+          Array.from({length: count}, (_, i) => i + 1).forEach(n => {
+            const myVal = myState[stateKey(team, n)] || 0
+            const friendVal = friendState[stateKey(team, n)] || 0
+            const playerName = PLAYERS[team]?.[n] || `${team} ${n}`
+
+            // Yo tengo repetida y a él le falta
+            if (myVal >= 2 && friendVal === 0) {
+              allMatches.push({ team, num: n, playerName, type: 'give', friendName: friend.name, friendId: friend.id })
+            }
+            // Él tiene repetida y a mí me falta
+            if (friendVal >= 2 && myVal === 0) {
+              allMatches.push({ team, num: n, playerName, type: 'receive', friendName: friend.name, friendId: friend.id })
+            }
+          })
+        })
+      })
+    })
+    setMatches(allMatches)
+    onMatchCount?.(allMatches.length)
+    setLoading(false)
+  }, [myState])
+
+  useEffect(() => { loadFriends() }, [loadFriends])
+
+  const handleSearch = async () => {
+    if (!searchQ.trim()) return
+    setSearching(true)
+    const res = await fetch(`/api/profiles?q=${encodeURIComponent(searchQ)}`)
+    const data = await res.json()
+    setSearchResults(data.profiles || [])
     setSearching(false)
   }
 
-  async function sendRequest(addressee_id: string) {
+  const sendRequest = async (addressee_id: string) => {
     await fetch('/api/friends', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'request', addressee_id })
     })
-    setSearchResults([])
-    setSearchEmail('')
-    loadAll()
+    setSearchResults(r => r.filter(p => p.id !== addressee_id))
+    loadFriends()
   }
 
-  async function accept(friendship_id: string) {
+  const acceptFriend = async (friendship_id: string) => {
     await fetch('/api/friends', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'accept', friendship_id })
     })
-    loadAll()
+    loadFriends()
   }
 
-  async function remove(friendship_id: string) {
-    if (!confirm('¿Eliminar este amigo?')) return
+  const rejectFriend = async (friendship_id: string) => {
     await fetch('/api/friends', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'remove', friendship_id })
+      body: JSON.stringify({ action: 'reject', friendship_id })
     })
-    loadAll()
+    loadFriends()
   }
 
-  const totalMatches = matches.reduce((a, m) => a + m.iCanGive.length + m.theyCanGive.length, 0)
+  const givingMatches = matches.filter(m => m.type === 'give')
+  const receivingMatches = matches.filter(m => m.type === 'receive')
+
+  const iso = (team: string) => TEAM_ISO[team]
 
   return (
     <div className="fixed inset-0 z-50 bg-white flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <h2 className="font-bold text-gray-900 text-base">👥 Amigos & Matches</h2>
+        <h2 className="font-bold text-gray-900 text-base">👥 Amigos</h2>
         <button onClick={onClose} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500">✕</button>
       </div>
 
       {/* Tabs */}
       <div className="flex border-b border-gray-100">
-        <button
-          onClick={() => setTab('matches')}
-          className={`flex-1 py-3 text-sm font-semibold transition ${tab === 'matches' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`}
-        >
-          🎯 Matches {totalMatches > 0 && <span className="ml-1 bg-green-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">{totalMatches}</span>}
-        </button>
-        <button
-          onClick={() => setTab('friends')}
-          className={`flex-1 py-3 text-sm font-semibold transition ${tab === 'friends' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`}
-        >
-          👤 Amigos {pendingReceived.length > 0 && <span className="ml-1 bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">{pendingReceived.length}</span>}
-        </button>
+        {[
+          { key: 'matches', label: `🎯 Matches${matches.length > 0 ? ` (${matches.length})` : ''}` },
+          { key: 'friends', label: `👥 Amigos${friends.length > 0 ? ` (${friends.length})` : ''}` },
+          { key: 'search', label: '🔍 Buscar' },
+        ].map(t => (
+          <button key={t.key} onClick={() => setView(t.key as typeof view)}
+            className={`flex-1 py-3 text-xs font-semibold transition border-b-2 ${
+              view === t.key ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'
+            }`}>
+            {t.label}
+          </button>
+        ))}
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {loading ? (
-          <div className="flex items-center justify-center h-40">
-            <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-800 rounded-full animate-spin" />
-          </div>
-        ) : tab === 'matches' ? (
-          <MatchesTab matches={matches} friends={friends} />
-        ) : (
-          <FriendsTab
-            friends={friends}
-            pendingReceived={pendingReceived}
-            pendingSent={pendingSent}
-            searchEmail={searchEmail}
-            setSearchEmail={setSearchEmail}
-            searchResults={searchResults}
-            searching={searching}
-            onSearch={search}
-            onSendRequest={sendRequest}
-            onAccept={accept}
-            onRemove={remove}
-          />
-        )}
-      </div>
-    </div>
-  )
-}
+        {/* MATCHES */}
+        {view === 'matches' && (
+          <div className="p-4 flex flex-col gap-4">
+            {loading && <p className="text-sm text-center text-gray-400 py-8">Calculando matches...</p>}
 
-function MatchesTab({ matches, friends }: { matches: Match[], friends: Friend[] }) {
-  const hasMatches = matches.some(m => m.iCanGive.length > 0 || m.theyCanGive.length > 0)
+            {!loading && friends.length === 0 && (
+              <div className="text-center py-12">
+                <div className="text-4xl mb-3">👥</div>
+                <p className="text-sm font-semibold text-gray-700">Todavía no tenés amigos</p>
+                <p className="text-xs text-gray-400 mt-1">Buscalos en la pestaña "Buscar"</p>
+              </div>
+            )}
 
-  if (friends.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-60 gap-3 px-8 text-center">
-        <div className="text-4xl">👥</div>
-        <p className="text-gray-500 text-sm">Agregá amigos para ver los matches automáticos</p>
-      </div>
-    )
-  }
+            {!loading && friends.length > 0 && matches.length === 0 && (
+              <div className="text-center py-12">
+                <div className="text-4xl mb-3">🎯</div>
+                <p className="text-sm font-semibold text-gray-700">No hay matches por ahora</p>
+                <p className="text-xs text-gray-400 mt-1">Los matches aparecen cuando podés darle o pedirle una figurita a un amigo</p>
+              </div>
+            )}
 
-  if (!hasMatches) {
-    return (
-      <div className="flex flex-col items-center justify-center h-60 gap-3 px-8 text-center">
-        <div className="text-4xl">🔍</div>
-        <p className="text-gray-500 text-sm">No hay matches todavía — seguí completando el álbum</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="p-4 flex flex-col gap-4">
-      {matches.map(match => {
-        if (match.iCanGive.length === 0 && match.theyCanGive.length === 0) return null
-        return (
-          <div key={match.friendId} className="border border-gray-200 rounded-2xl overflow-hidden">
-            <div className="px-4 py-3 bg-gray-50 flex items-center justify-between">
+            {givingMatches.length > 0 && (
               <div>
-                <div className="font-semibold text-gray-900 text-sm">{match.friendName}</div>
-                <div className="text-xs text-gray-400">{match.friendEmail}</div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">📤 Podés darle a un amigo ({givingMatches.length})</h3>
+                <div className="flex flex-col gap-2">
+                  {givingMatches.map((m, i) => (
+                    <div key={i} className="flex items-center gap-3 bg-green-50 border border-green-100 rounded-xl px-3 py-2.5">
+                      {iso(m.team) && (
+                        <img src={`https://flagicons.lipis.dev/flags/4x3/${iso(m.team)}.svg`}
+                          className="w-8 h-6 object-cover rounded-sm flex-shrink-0" alt={m.team}
+                          onError={e => (e.currentTarget.style.display='none')} />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-bold text-gray-900">{m.team} {m.num} — {m.playerName}</div>
+                        <div className="text-xs text-green-700">Para <span className="font-semibold">{m.friendName}</span></div>
+                      </div>
+                      <span className="text-green-600 text-lg">✓</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="flex gap-2">
-                {match.iCanGive.length > 0 && (
-                  <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-1 rounded-lg">
-                    ↑ {match.iCanGive.length} le doy
-                  </span>
-                )}
-                {match.theyCanGive.length > 0 && (
-                  <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-lg">
-                    ↓ {match.theyCanGive.length} me da
-                  </span>
-                )}
+            )}
+
+            {receivingMatches.length > 0 && (
+              <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">📥 Podés pedirle a un amigo ({receivingMatches.length})</h3>
+                <div className="flex flex-col gap-2">
+                  {receivingMatches.map((m, i) => (
+                    <div key={i} className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5">
+                      {iso(m.team) && (
+                        <img src={`https://flagicons.lipis.dev/flags/4x3/${iso(m.team)}.svg`}
+                          className="w-8 h-6 object-cover rounded-sm flex-shrink-0" alt={m.team}
+                          onError={e => (e.currentTarget.style.display='none')} />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-bold text-gray-900">{m.team} {m.num} — {m.playerName}</div>
+                        <div className="text-xs text-blue-700"><span className="font-semibold">{m.friendName}</span> la tiene repetida</div>
+                      </div>
+                      <span className="text-blue-500 text-lg">↓</span>
+                    </div>
+                  ))}
+                </div>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* AMIGOS */}
+        {view === 'friends' && (
+          <div className="p-4 flex flex-col gap-4">
+            {/* Solicitudes recibidas */}
+            {pendingReceived.length > 0 && (
+              <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Solicitudes recibidas ({pendingReceived.length})</h3>
+                <div className="flex flex-col gap-2">
+                  {pendingReceived.map(p => (
+                    <div key={p.friendshipId} className="flex items-center gap-3 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2.5">
+                      <div className="w-9 h-9 rounded-full bg-amber-200 flex items-center justify-center text-sm font-bold text-amber-800">
+                        {p.name?.[0]?.toUpperCase() || '?'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-bold text-gray-900 truncate">{p.name}</div>
+                        <div className="text-xs text-gray-400 truncate">{p.email}</div>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <button onClick={() => acceptFriend(p.friendshipId)}
+                          className="px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg">
+                          Aceptar
+                        </button>
+                        <button onClick={() => rejectFriend(p.friendshipId)}
+                          className="px-3 py-1.5 bg-gray-100 text-gray-600 text-xs font-semibold rounded-lg">
+                          No
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Amigos aceptados */}
+            {friends.length > 0 && (
+              <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Mis amigos ({friends.length})</h3>
+                <div className="flex flex-col gap-2">
+                  {friends.map(f => {
+                    const fTotal = Object.values(f.figuritas || {}).filter(v => v >= 1).length
+                    const fRep = Object.values(f.figuritas || {}).reduce((a, v) => a + Math.max(0, v-1), 0)
+                    const myMatchCount = matches.filter(m => m.friendId === f.id).length
+                    return (
+                      <div key={f.id} className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
+                        <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-600">
+                          {f.name?.[0]?.toUpperCase() || '?'}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-bold text-gray-900 truncate">{f.name}</div>
+                          <div className="text-xs text-gray-400">{fTotal} figuritas · {fRep} repetidas</div>
+                        </div>
+                        {myMatchCount > 0 && (
+                          <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded-full">
+                            {myMatchCount} match{myMatchCount !== 1 ? 'es' : ''}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Solicitudes enviadas */}
+            {pendingSent.length > 0 && (
+              <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Solicitudes enviadas</h3>
+                <div className="flex flex-col gap-2">
+                  {pendingSent.map(p => p && (
+                    <div key={p.id} className="flex items-center gap-3 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5 opacity-60">
+                      <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500">
+                        {p.name?.[0]?.toUpperCase() || '?'}
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-sm font-semibold text-gray-700">{p.name}</div>
+                        <div className="text-xs text-gray-400">Pendiente...</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {friends.length === 0 && pendingReceived.length === 0 && pendingSent.length === 0 && (
+              <div className="text-center py-12">
+                <div className="text-4xl mb-3">👥</div>
+                <p className="text-sm font-semibold text-gray-700">Todavía no tenés amigos</p>
+                <p className="text-xs text-gray-400 mt-1">Buscalos por nombre o email</p>
+                <button onClick={() => setView('search')} className="mt-4 px-4 py-2 bg-gray-900 text-white text-sm font-semibold rounded-xl">
+                  Buscar amigos
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* BUSCAR */}
+        {view === 'search' && (
+          <div className="p-4 flex flex-col gap-4">
+            <div className="flex gap-2">
+              <input
+                value={searchQ}
+                onChange={e => setSearchQ(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                placeholder="Nombre, apellido o email..."
+                className="flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-gray-400"
+                autoFocus
+              />
+              <button
+                onClick={handleSearch}
+                disabled={searching}
+                className="px-4 py-3 bg-gray-900 text-white rounded-xl text-sm font-semibold disabled:bg-gray-300"
+              >
+                {searching ? '...' : 'Buscar'}
+              </button>
             </div>
 
-            {match.iCanGive.length > 0 && (
-              <div className="px-4 py-3 border-t border-gray-100">
-                <div className="text-xs font-semibold text-green-700 mb-2">📤 Yo le puedo dar:</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {match.iCanGive.map(({ team, num }) => (
-                    <StickerChip key={`${team}_${num}`} team={team} num={num} color="green" />
-                  ))}
-                </div>
+            {searchResults.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {searchResults.map(p => {
+                  const isFriend = friends.some(f => f.id === p.id)
+                  const isPendingSent = pendingSent.some(f => f?.id === p.id)
+                  return (
+                    <div key={p.id} className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
+                      <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-600">
+                        {p.name?.[0]?.toUpperCase() || '?'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-bold text-gray-900 truncate">{p.name}</div>
+                        <div className="text-xs text-gray-400 truncate">{p.email}</div>
+                      </div>
+                      {isFriend ? (
+                        <span className="text-xs text-green-600 font-semibold">✓ Amigo</span>
+                      ) : isPendingSent ? (
+                        <span className="text-xs text-gray-400">Pendiente</span>
+                      ) : (
+                        <button onClick={() => sendRequest(p.id)}
+                          className="px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg">
+                          + Agregar
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
 
-            {match.theyCanGive.length > 0 && (
-              <div className="px-4 py-3 border-t border-gray-100">
-                <div className="text-xs font-semibold text-blue-700 mb-2">📥 Él/ella me puede dar:</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {match.theyCanGive.map(({ team, num }) => (
-                    <StickerChip key={`${team}_${num}`} team={team} num={num} color="blue" />
-                  ))}
-                </div>
-              </div>
+            {searchResults.length === 0 && searchQ && !searching && (
+              <p className="text-sm text-center text-gray-400 py-4">No se encontraron usuarios</p>
             )}
           </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function StickerChip({ team, num, color }: { team: string; num: number; color: 'green'|'blue' }) {
-  const iso = TEAM_ISO[team]
-  const player = PLAYERS[team]?.[num]
-  const cls = color === 'green'
-    ? 'bg-green-50 border-green-200 text-green-800'
-    : 'bg-blue-50 border-blue-200 text-blue-800'
-
-  return (
-    <div className={`flex items-center gap-1 border rounded-lg px-2 py-1 text-xs font-semibold ${cls}`}>
-      {iso && <img src={`https://flagicons.lipis.dev/flags/4x3/${iso}.svg`} className="w-4 h-3 object-cover rounded-sm" alt="" onError={e => (e.currentTarget.style.display='none')} />}
-      <span>{team} {num}</span>
-      {player && <span className="text-[10px] opacity-70 hidden sm:inline">· {player}</span>}
-    </div>
-  )
-}
-
-function FriendsTab({
-  friends, pendingReceived, pendingSent,
-  searchEmail, setSearchEmail, searchResults, searching,
-  onSearch, onSendRequest, onAccept, onRemove
-}: {
-  friends: Friend[]
-  pendingReceived: Friend[]
-  pendingSent: {id:string,email:string,name:string}[]
-  searchEmail: string
-  setSearchEmail: (v: string) => void
-  searchResults: {id:string,email:string,name:string}[]
-  searching: boolean
-  onSearch: () => void
-  onSendRequest: (id: string) => void
-  onAccept: (id: string) => void
-  onRemove: (id: string) => void
-}) {
-  return (
-    <div className="p-4 flex flex-col gap-4">
-      {/* Buscar amigo */}
-      <div>
-        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Agregar amigo</div>
-        <div className="flex gap-2">
-          <input
-            value={searchEmail}
-            onChange={e => setSearchEmail(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && onSearch()}
-            placeholder="Email del amigo..."
-            className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-gray-400"
-          />
-          <button
-            onClick={onSearch}
-            disabled={searching}
-            className="px-4 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-semibold disabled:bg-gray-300"
-          >
-            {searching ? '...' : 'Buscar'}
-          </button>
-        </div>
-
-        {searchResults.length > 0 && (
-          <div className="mt-2 border border-gray-200 rounded-xl overflow-hidden">
-            {searchResults.map(r => (
-              <div key={r.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50">
-                <div>
-                  <div className="text-sm font-medium text-gray-900">{r.name || r.email}</div>
-                  <div className="text-xs text-gray-400">{r.email}</div>
-                </div>
-                <button onClick={() => onSendRequest(r.id)} className="text-xs bg-gray-900 text-white px-3 py-1.5 rounded-lg font-semibold">
-                  Agregar
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {searchResults.length === 0 && searchEmail && !searching && (
-          <p className="text-xs text-gray-400 mt-2 text-center">No se encontraron usuarios con ese email</p>
         )}
       </div>
-
-      {/* Solicitudes recibidas */}
-      {pendingReceived.length > 0 && (
-        <div>
-          <div className="text-xs font-semibold text-red-500 uppercase tracking-wide mb-2">Solicitudes recibidas</div>
-          <div className="flex flex-col gap-2">
-            {pendingReceived.map(f => (
-              <div key={f.id} className="flex items-center justify-between border border-red-100 bg-red-50 rounded-xl px-4 py-3">
-                <div>
-                  <div className="text-sm font-medium text-gray-900">{f.name || f.email}</div>
-                  <div className="text-xs text-gray-400">{f.email}</div>
-                </div>
-                <button onClick={() => onAccept(f.friendship_id)} className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg font-semibold">
-                  Aceptar
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Solicitudes enviadas */}
-      {pendingSent.length > 0 && (
-        <div>
-          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Solicitudes enviadas</div>
-          <div className="flex flex-col gap-2">
-            {pendingSent.map(f => (
-              <div key={f.id} className="flex items-center justify-between border border-gray-200 rounded-xl px-4 py-3">
-                <div>
-                  <div className="text-sm font-medium text-gray-900">{f.name || f.email}</div>
-                  <div className="text-xs text-gray-400">{f.email}</div>
-                </div>
-                <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-lg">Pendiente</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Amigos */}
-      {friends.length > 0 && (
-        <div>
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Mis amigos</div>
-          <div className="flex flex-col gap-2">
-            {friends.map((f: Friend) => (
-              <div key={f.id} className="flex items-center justify-between border border-gray-200 rounded-xl px-4 py-3">
-                <div>
-                  <div className="text-sm font-medium text-gray-900">{f.name || f.email}</div>
-                  <div className="text-xs text-gray-400">{f.email}</div>
-                </div>
-                <button onClick={() => onRemove(f.friendship_id)} className="text-xs text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg">
-                  Eliminar
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {friends.length === 0 && pendingReceived.length === 0 && pendingSent.length === 0 && (
-        <div className="flex flex-col items-center justify-center h-40 gap-3 text-center">
-          <div className="text-4xl">👥</div>
-          <p className="text-gray-500 text-sm">Buscá amigos por email para empezar a hacer matches</p>
-        </div>
-      )}
     </div>
   )
 }

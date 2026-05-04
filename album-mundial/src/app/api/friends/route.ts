@@ -36,36 +36,58 @@ export async function GET() {
 
   if (!friendships) return NextResponse.json({ friends: [], pending: [] })
 
-  const friendIds = friendships
-    .filter(f => f.status === 'accepted')
-    .map(f => f.requester_id === user.id ? f.addressee_id : f.requester_id)
+  const accepted = friendships.filter(f => f.status === 'accepted')
+  const pending = friendships.filter(f => f.status === 'pending')
 
-  const pendingReceived = friendships
-    .filter(f => f.status === 'pending' && f.addressee_id === user.id)
-    .map(f => f.requester_id)
-
-  const pendingSent = friendships
-    .filter(f => f.status === 'pending' && f.requester_id === user.id)
+  // Obtener IDs de amigos
+  const friendIds = accepted.map(f =>
+    f.requester_id === user.id ? f.addressee_id : f.requester_id
+  )
+  const pendingReceivedIds = pending
+    .filter(f => f.addressee_id === user.id)
+    .map(f => ({ id: f.requester_id, friendshipId: f.id }))
+  const pendingSentIds = pending
+    .filter(f => f.requester_id === user.id)
     .map(f => f.addressee_id)
 
   // Obtener perfiles
-  const allIds = [...friendIds, ...pendingReceived, ...pendingSent]
-  let profiles: {id: string, email: string, name: string}[] = []
+  const allIds = [...friendIds, ...pendingReceivedIds.map(p => p.id), ...pendingSentIds]
+  let profiles: Record<string, {id:string;name:string;email:string;avatar_url:string}> = {}
   if (allIds.length > 0) {
-    const { data } = await supabase.from('profiles').select('id, email, name').in('id', allIds)
-    profiles = data || []
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('id, name, email, avatar_url')
+      .in('id', allIds)
+    profileData?.forEach(p => { profiles[p.id] = p })
   }
 
-  const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]))
+  // Obtener figuritas de amigos
+  const friendFiguritas: Record<string, Record<string, number>> = {}
+  if (friendIds.length > 0) {
+    const { data: figs } = await supabase
+      .from('figuritas')
+      .select('user_id, team, num, valor')
+      .in('user_id', friendIds)
+    figs?.forEach(f => {
+      if (!friendFiguritas[f.user_id]) friendFiguritas[f.user_id] = {}
+      friendFiguritas[f.user_id][`${f.team}_${f.num}`] = f.valor
+    })
+  }
 
   return NextResponse.json({
-    friends: friendIds.map(id => ({ ...profileMap[id], friendship_id: friendships.find(f => (f.requester_id === id || f.addressee_id === id) && f.status === 'accepted')?.id })),
-    pendingReceived: pendingReceived.map(id => ({ ...profileMap[id], friendship_id: friendships.find(f => f.requester_id === id)?.id })),
-    pendingSent: pendingSent.map(id => profileMap[id]),
+    friends: friendIds.map(id => ({
+      ...profiles[id],
+      figuritas: friendFiguritas[id] || {}
+    })),
+    pendingReceived: pendingReceivedIds.map(p => ({
+      friendshipId: p.id,
+      ...profiles[p.id]
+    })),
+    pendingSent: pendingSentIds.map(id => profiles[id]).filter(Boolean)
   })
 }
 
-// POST — enviar solicitud, aceptar, o buscar usuario
+// POST — enviar solicitud o aceptar
 export async function POST(req: NextRequest) {
   const supabase = await getSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -73,44 +95,31 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
 
-  // Buscar usuario por email
-  if (body.action === 'search') {
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, email, name')
-      .ilike('email', `%${body.email}%`)
-      .neq('id', user.id)
-      .limit(5)
-    return NextResponse.json({ results: data || [] })
-  }
-
-  // Enviar solicitud
   if (body.action === 'request') {
-    const { error } = await supabase.from('friendships').insert({
-      requester_id: user.id,
-      addressee_id: body.addressee_id,
-      status: 'pending'
-    })
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    const { addressee_id } = body
+    const { error } = await supabase
+      .from('friendships')
+      .insert({ requester_id: user.id, addressee_id, status: 'pending' })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ ok: true })
   }
 
-  // Aceptar solicitud
   if (body.action === 'accept') {
+    const { friendship_id } = body
     const { error } = await supabase
       .from('friendships')
       .update({ status: 'accepted' })
-      .eq('id', body.friendship_id)
+      .eq('id', friendship_id)
       .eq('addressee_id', user.id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ ok: true })
   }
 
-  // Eliminar amistad
-  if (body.action === 'remove') {
-    await supabase.from('friendships').delete().eq('id', body.friendship_id)
+  if (body.action === 'reject') {
+    const { friendship_id } = body
+    await supabase.from('friendships').delete().eq('id', friendship_id)
     return NextResponse.json({ ok: true })
   }
 
-  return NextResponse.json({ error: 'unknown action' }, { status: 400 })
+  return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
 }
