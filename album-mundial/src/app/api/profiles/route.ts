@@ -33,12 +33,13 @@ export async function GET(req: NextRequest) {
 
   if (q) {
     // Búsqueda por nombre o email
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
       .select('id, name, email, avatar_url')
       .or(`name.ilike.%${q}%,email.ilike.%${q}%`)
       .neq('id', user.id)
       .limit(10)
+    console.log('Search query:', q, 'Results:', data, 'Error:', error, 'UserId:', user.id)
     return NextResponse.json({ profiles: data || [] })
   }
 
