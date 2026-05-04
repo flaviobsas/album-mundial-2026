@@ -342,8 +342,9 @@ export default function Album({ user }: { user: User }) {
             <div className="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[180px]">
               <button onClick={() => { setShowQuickLoad(true); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 font-medium text-gray-900">⚡ Carga rápida</button>
               <div className="h-px bg-gray-100" />
-              <button onClick={() => { exportFaltantes(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">Exportar faltantes ↗</button>
-              <button onClick={() => { exportRepetidas(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">Exportar repetidas ↗</button>
+              <button onClick={() => { exportTengo(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">📩 Compartir las que tengo</button>
+              <button onClick={() => { exportFaltantes(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">📩 Compartir faltantes</button>
+              <button onClick={() => { exportRepetidas(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">📩 Compartir repetidas</button>
               <div className="h-px bg-gray-100" />
               <button onClick={logout} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 text-gray-500">Cerrar sesión</button>
               <div className="h-px bg-gray-100" />
@@ -493,32 +494,116 @@ export default function Album({ user }: { user: User }) {
     </div>
   )
 
-  function exportFaltantes() {
-    const lines = ['FIGURITAS QUE ME FALTAN - Copa 2026\n']
-    GROUPS.forEach(g => {
-      const grupo: string[] = []
-      Object.entries(g.teams).forEach(([t, c]) => {
-        const f = Array.from({length:c},(_,i)=>i+1).filter(n=>!(state[stateKey(t,n)])).map(n=>`${t} ${n}`)
-        if (f.length) grupo.push(f.join(', '))
-      })
-      if (grupo.length) lines.push(`${g.name}:\n${grupo.join('\n')}`)
-    })
-    navigator.clipboard.writeText(lines.join('\n')).then(() => alert('Lista copiada!'))
-  }
-
   function exportRepetidas() {
-    const lines = ['FIGURITAS REPETIDAS - Copa 2026\n']
+    const flags: Record<string, string> = {
+      MEX:'🇲🇽',RSA:'🇿🇦',KOR:'🇰🇷',CZE:'🇨🇿',CAN:'🇨🇦',BIH:'🇧🇦',QAT:'🇶🇦',SUI:'🇨🇭',
+      BRA:'🇧🇷',MAR:'🇲🇦',HAI:'🇭🇹',SCO:'🏴󠁧󠁢󠁳󠁣󠁴󠁿',USA:'🇺🇸',PAR:'🇵🇾',AUS:'🇦🇺',TUR:'🇹🇷',
+      GER:'🇩🇪',CUW:'🇨🇼',CIV:'🇨🇮',ECU:'🇪🇨',NED:'🇳🇱',JPN:'🇯🇵',SWE:'🇸🇪',TUN:'🇹🇳',
+      BEL:'🇧🇪',EGV:'🇪🇬',IRN:'🇮🇷',NZL:'🇳🇿',ESP:'🇪🇸',CPV:'🇨🇻',KSA:'🇸🇦',URU:'🇺🇾',
+      FRA:'🇫🇷',SEN:'🇸🇳',IRQ:'🇮🇶',NOR:'🇳🇴',ARG:'🇦🇷',ALG:'🇩🇿',AUT:'🇦🇹',JOR:'🇯🇴',
+      POR:'🇵🇹',COD:'🇨🇩',UZB:'🇺🇿',COL:'🇨🇴',ENG:'🏴󠁧󠁢󠁥󠁮󠁧󠁿',CRO:'🇭🇷',GHA:'🇬🇭',PAN:'🇵🇦',
+      FWC:'🏆',OO:'📋',CC:'⭐'
+    }
+    const lines: string[] = ['🏆 *Mis figuritas repetidas - Copa del Mundo 2026*\n']
+    let total = 0
     GROUPS.forEach(g => {
       const rep: string[] = []
-      Object.entries(g.teams).forEach(([t, c]) => {
-        Array.from({length:c},(_,i)=>i+1).forEach(n => {
-          const v = state[stateKey(t,n)] || 0
-          if (v >= 2) rep.push(`${t} ${n} x${v-1}`)
+      Object.entries(g.teams).forEach(([team, count]) => {
+        Array.from({length: count}, (_, i) => i + 1).forEach(n => {
+          const v = state[stateKey(team, n)] || 0
+          if (v >= 2) {
+            const cant = v - 1
+            const flag = flags[team] || ''
+            const player = PLAYERS[team]?.[n] ? ` (${PLAYERS[team][n]})` : ''
+            rep.push(`${flag} ${team} ${n}${player} x${cant}`)
+            total += cant
+          }
         })
       })
-      if (rep.length) lines.push(`${g.name}:\n${rep.join(', ')}`)
+      if (rep.length) lines.push(`*${g.name}*\n${rep.join('\n')}`)
     })
-    navigator.clipboard.writeText(lines.join('\n')).then(() => alert('Lista copiada!'))
+    if (total === 0) { alert('No tenés figuritas repetidas todavía.'); return }
+    lines.push(`\n_Total: ${total} repetida${total !== 1 ? 's' : ''}_`)
+    const text = lines.join('\n\n')
+    navigator.clipboard.writeText(text).then(() => {
+      if (/android|iphone|ipad/i.test(navigator.userAgent)) {
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
+      } else {
+        alert('✓ Texto copiado. Podés pegarlo en WhatsApp.')
+      }
+    })
+  }
+
+  function exportFaltantes() {
+    const flags: Record<string, string> = {
+      MEX:'🇲🇽',RSA:'🇿🇦',KOR:'🇰🇷',CZE:'🇨🇿',CAN:'🇨🇦',BIH:'🇧🇦',QAT:'🇶🇦',SUI:'🇨🇭',
+      BRA:'🇧🇷',MAR:'🇲🇦',HAI:'🇭🇹',SCO:'🏴󠁧󠁢󠁳󠁣󠁴󠁿',USA:'🇺🇸',PAR:'🇵🇾',AUS:'🇦🇺',TUR:'🇹🇷',
+      GER:'🇩🇪',CUW:'🇨🇼',CIV:'🇨🇮',ECU:'🇪🇨',NED:'🇳🇱',JPN:'🇯🇵',SWE:'🇸🇪',TUN:'🇹🇳',
+      BEL:'🇧🇪',EGV:'🇪🇬',IRN:'🇮🇷',NZL:'🇳🇿',ESP:'🇪🇸',CPV:'🇨🇻',KSA:'🇸🇦',URU:'🇺🇾',
+      FRA:'🇫🇷',SEN:'🇸🇳',IRQ:'🇮🇶',NOR:'🇳🇴',ARG:'🇦🇷',ALG:'🇩🇿',AUT:'🇦🇹',JOR:'🇯🇴',
+      POR:'🇵🇹',COD:'🇨🇩',UZB:'🇺🇿',COL:'🇨🇴',ENG:'🏴󠁧󠁢󠁥󠁮󠁧󠁿',CRO:'🇭🇷',GHA:'🇬🇭',PAN:'🇵🇦',
+      FWC:'🏆',OO:'📋',CC:'⭐'
+    }
+    const lines: string[] = ['🏆 *Me faltan estas figuritas - Copa del Mundo 2026*\n']
+    let total = 0
+    GROUPS.forEach(g => {
+      const falt: string[] = []
+      Object.entries(g.teams).forEach(([team, count]) => {
+        const nums = Array.from({length: count}, (_, i) => i + 1)
+          .filter(n => !(state[stateKey(team, n)]))
+        if (nums.length) {
+          falt.push(`${flags[team] || ''} ${team}: ${nums.join(', ')}`)
+          total += nums.length
+        }
+      })
+      if (falt.length) lines.push(`*${g.name}*\n${falt.join('\n')}`)
+    })
+    if (total === 0) { alert('¡Tenés el álbum completo! 🎉'); return }
+    lines.push(`\n_Me faltan ${total} figurita${total !== 1 ? 's' : ''}_`)
+    const text = lines.join('\n\n')
+    navigator.clipboard.writeText(text).then(() => {
+      if (/android|iphone|ipad/i.test(navigator.userAgent)) {
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
+      } else {
+        alert('✓ Texto copiado. Podés pegarlo en WhatsApp.')
+      }
+    })
+  }
+
+  function exportTengo() {
+    const flags: Record<string, string> = {
+      MEX:'🇲🇽',RSA:'🇿🇦',KOR:'🇰🇷',CZE:'🇨🇿',CAN:'🇨🇦',BIH:'🇧🇦',QAT:'🇶🇦',SUI:'🇨🇭',
+      BRA:'🇧🇷',MAR:'🇲🇦',HAI:'🇭🇹',SCO:'🏴󠁧󠁢󠁳󠁣󠁴󠁿',USA:'🇺🇸',PAR:'🇵🇾',AUS:'🇦🇺',TUR:'🇹🇷',
+      GER:'🇩🇪',CUW:'🇨🇼',CIV:'🇨🇮',ECU:'🇪🇨',NED:'🇳🇱',JPN:'🇯🇵',SWE:'🇸🇪',TUN:'🇹🇳',
+      BEL:'🇧🇪',EGV:'🇪🇬',IRN:'🇮🇷',NZL:'🇳🇿',ESP:'🇪🇸',CPV:'🇨🇻',KSA:'🇸🇦',URU:'🇺🇾',
+      FRA:'🇫🇷',SEN:'🇸🇳',IRQ:'🇮🇶',NOR:'🇳🇴',ARG:'🇦🇷',ALG:'🇩🇿',AUT:'🇦🇹',JOR:'🇯🇴',
+      POR:'🇵🇹',COD:'🇨🇩',UZB:'🇺🇿',COL:'🇨🇴',ENG:'🏴󠁧󠁢󠁥󠁮󠁧󠁿',CRO:'🇭🇷',GHA:'🇬🇭',PAN:'🇵🇦',
+      FWC:'🏆',OO:'📋',CC:'⭐'
+    }
+    const lines: string[] = ['🏆 *Mis figuritas - Copa del Mundo 2026*\n']
+    let total = 0
+    GROUPS.forEach(g => {
+      const tengoList: string[] = []
+      Object.entries(g.teams).forEach(([team, count]) => {
+        const nums = Array.from({length: count}, (_, i) => i + 1)
+          .filter(n => (state[stateKey(team, n)] || 0) >= 1)
+        if (nums.length) {
+          tengoList.push(`${flags[team] || ''} ${team}: ${nums.join(', ')}`)
+          total += nums.length
+        }
+      })
+      if (tengoList.length) lines.push(`*${g.name}*\n${tengoList.join('\n')}`)
+    })
+    if (total === 0) { alert('Todavía no tenés ninguna figurita.'); return }
+    lines.push(`\n_Total: ${total} figurita${total !== 1 ? 's' : ''}_`)
+    const text = lines.join('\n\n')
+    navigator.clipboard.writeText(text).then(() => {
+      if (/android|iphone|ipad/i.test(navigator.userAgent)) {
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
+      } else {
+        alert('✓ Texto copiado. Podés pegarlo en WhatsApp.')
+      }
+    })
   }
 
   async function resetAll() {
