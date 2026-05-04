@@ -40,8 +40,6 @@ export default function Album({ user, hasProfile }: { user: User; hasProfile: bo
   const [showShare, setShowShare] = useState(false)
   const [showFriends, setShowFriends] = useState(false)
   const [matchCount, setMatchCount] = useState(0)
-  const [showFriends, setShowFriends] = useState(false)
-  const [matchCount, setMatchCount] = useState(0)
   const [repPopover, setRepPopover] = useState<{ team: string; num: number } | null>(null)
   const [scannedResult, setScannedResult] = useState<ScannedResult | null>(null)
   // Carga rápida
@@ -581,17 +579,6 @@ export default function Album({ user, hasProfile }: { user: User; hasProfile: bo
       {/* Scanner */}
       {showScanner && (
         <Scanner state={state} onDetect={handleScanDetect} onClose={() => setShowScanner(false)} />
-      )}
-
-      {/* Friends */}
-      {showFriends && (
-        <Friends onClose={() => {
-          setShowFriends(false)
-          fetch('/api/matches').then(r => r.json()).then(d => {
-            const t = (d.matches || []).reduce((a: number, m: {iCanGive: unknown[], theyCanGive: unknown[]}) => a + m.iCanGive.length + m.theyCanGive.length, 0)
-            setMatchCount(t)
-          })
-        }} />
       )}
     </div>
   )
