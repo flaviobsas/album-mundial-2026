@@ -97,19 +97,22 @@ export default function Scanner({ state, onDetect, onClose }: ScannerProps) {
     setAttempts(a => a + 1)
 
     try {
-      // Capturar frame — recortar zona central donde está el código
+      // Recortar SOLO la esquina superior derecha donde está el código
+      // El código (ej: CIV 1, USA 13) está arriba a la derecha en una pastilla oscura
       const canvas = document.createElement('canvas')
       const cw = video.videoWidth, ch = video.videoHeight
-      // Recortar el área del marco (zona central)
-      const cropW = Math.round(cw * 0.6)
-      const cropH = Math.round(ch * 0.5)
-      const cropX = Math.round((cw - cropW) / 2)
-      const cropY = Math.round((ch - cropH) / 2)
-      // Escalar grande para mejor OCR
-      canvas.width = cropW * 2
-      canvas.height = cropH * 2
+      // Esquina superior derecha: 40% del ancho, 25% del alto
+      const cropW = Math.round(cw * 0.45)
+      const cropH = Math.round(ch * 0.22)
+      const cropX = Math.round(cw * 0.55) // desde el 55% hacia la derecha
+      const cropY = Math.round(ch * 0.08) // desde arriba con pequeño margen
+
+      // Escalar 3x para mejor OCR del texto pequeño
+      canvas.width = cropW * 3
+      canvas.height = cropH * 3
       const ctx = canvas.getContext('2d')!
-      ctx.filter = 'contrast(2.5) brightness(1.3) grayscale(1)'
+      // Alto contraste: la pastilla es blanca sobre fondo oscuro
+      ctx.filter = 'contrast(3) brightness(1.5) grayscale(1)'
       ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height)
 
       const worker = workerRef.current as {
@@ -218,15 +221,20 @@ export default function Scanner({ state, onDetect, onClose }: ScannerProps) {
 
         <div className="relative bg-black" style={{ aspectRatio: '3/4' }}>
           <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="relative" style={{ width: 160, height: 200 }}>
+          <div className="absolute inset-0 pointer-events-none">
+            {/* Marco en esquina superior derecha donde está el código */}
+            <div className="absolute" style={{ top: '8%', right: '5%', width: '42%', height: '20%' }}>
               <div className="absolute inset-0 rounded-xl" style={{
-                boxShadow: '0 0 0 1000px rgba(0,0,0,0.5)',
-                border: '2px solid rgba(255,255,255,0.8)',
-                borderRadius: 12
+                border: '2px solid rgba(255,255,255,0.9)',
+                borderRadius: 10,
+                boxShadow: '0 0 0 2000px rgba(0,0,0,0.45)'
               }} />
-              <div className="absolute top-0 left-0 w-6 h-6 border-l-[3px] border-t-[3px] border-green-400 rounded-tl-lg" />
-              <div className="absolute bottom-0 right-0 w-6 h-6 border-r-[3px] border-b-[3px] border-green-400 rounded-br-lg" />
+              <div className="absolute top-0 left-0 w-5 h-5 border-l-[3px] border-t-[3px] border-green-400 rounded-tl-lg" />
+              <div className="absolute bottom-0 right-0 w-5 h-5 border-r-[3px] border-b-[3px] border-green-400 rounded-br-lg" />
+            </div>
+            {/* Label */}
+            <div className="absolute text-white text-xs font-semibold bg-black/50 px-2 py-1 rounded-lg" style={{ top: '30%', right: '5%' }}>
+              Apuntá al código ↗
             </div>
           </div>
           <div className="absolute bottom-3 left-0 right-0 flex items-center justify-center gap-2 text-white/90 text-xs">
