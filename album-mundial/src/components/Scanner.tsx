@@ -21,130 +21,33 @@ const TEAMS = [
 export default function Scanner({ state, onDetect, onClose }: ScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const intervalRef = useRef<NodeJS.Timeout | null>(null)
-  const workerRef = useRef<unknown>(null)
-  const scanningRef = useRef(false)
-
-  const [status, setStatus] = useState('Cargando OCR...')
+  const [status, setStatus] = useState('Iniciando cámara...')
   const [statusType, setStatusType] = useState<'idle'|'processing'|'success'|'error'>('idle')
-  const [result, setResult] = useState<ScanResult | null>(null)
-  const [attempts, setAttempts] = useState(0)
+  const [scanning, setScanning] = useState(false)
   const [lastRead, setLastRead] = useState('')
-  const [ocrReady, setOcrReady] = useState(false)
 
   const parseText = (text: string): ScanResult | null => {
-    // Corregir errores comunes de OCR
-    let upper = text.toUpperCase()
-    upper = upper.replace(/0/g, 'O').replace(/1/g, 'I') // primer pase: números a letras para encontrar el equipo
-    
-    // Buscar equipo primero
+    const upper = text.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ')
     for (const team of TEAMS) {
-      if (upper.includes(team)) {
-        // Encontrado el equipo — ahora buscar el número en el texto original
-        const numText = text.toUpperCase().replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
-        const patterns = [
-          new RegExp(`\\b${team}\\s*(\\d{1,2})\\b`),
-          new RegExp(`${team}\\D{0,3}(\\d{1,2})`),
-        ]
-        for (const pat of patterns) {
-          const m = numText.match(pat)
-          if (m) {
-            const num = parseInt(m[1])
-            const groupEntry = GROUPS.flatMap(g => Object.entries(g.teams)).find(([t]) => t === team)
-            if (groupEntry && num >= 1 && num <= groupEntry[1]) {
-              return { team, num }
-            }
-          }
+      const patterns = [
+        new RegExp(`\\b${team}\\s*(\\d{1,2})\\b`),
+        new RegExp(`${team}\\D{0,2}(\\d{1,2})`),
+      ]
+      for (const pat of patterns) {
+        const m = upper.match(pat)
+        if (m) {
+          const num = parseInt(m[1])
+          const groupEntry = GROUPS.flatMap(g => Object.entries(g.teams)).find(([t]) => t === team)
+          if (groupEntry && num >= 1 && num <= groupEntry[1]) return { team, num }
         }
       }
     }
     return null
   }
 
-  // Cargar Tesseract desde CDN
-  useEffect(() => {
-    const script = document.createElement('script')
-    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
-    script.onload = async () => {
-      try {
-        const Tesseract = (window as unknown as {Tesseract: {createWorker: (lang: string) => Promise<unknown>}}).Tesseract
-        const worker = await Tesseract.createWorker('eng')
-        workerRef.current = worker
-        setOcrReady(true)
-        setStatus('Apuntá al número de la figurita')
-        setStatusType('idle')
-        // Iniciar cámara
-        startCamera()
-      } catch {
-        setStatus('Error al cargar OCR')
-        setStatusType('error')
-      }
-    }
-    document.head.appendChild(script)
-    return () => {
-      if (workerRef.current) {
-        (workerRef.current as {terminate: () => void}).terminate()
-      }
-    }
-  }, [])
-
-  const captureAndScan = useCallback(async () => {
-    if (scanningRef.current || !videoRef.current || !workerRef.current) return
-    const video = videoRef.current
-    if (!video.videoWidth || !video.videoHeight) return
-
-    scanningRef.current = true
-    setAttempts(a => a + 1)
-
-    try {
-      // Recortar SOLO la esquina superior derecha donde está el código
-      // El código (ej: CIV 1, USA 13) está arriba a la derecha en una pastilla oscura
-      const canvas = document.createElement('canvas')
-      const cw = video.videoWidth, ch = video.videoHeight
-      // Esquina superior derecha: 40% del ancho, 25% del alto
-      const cropW = Math.round(cw * 0.45)
-      const cropH = Math.round(ch * 0.22)
-      const cropX = Math.round(cw * 0.55) // desde el 55% hacia la derecha
-      const cropY = Math.round(ch * 0.08) // desde arriba con pequeño margen
-
-      // Escalar 3x para mejor OCR del texto pequeño
-      canvas.width = cropW * 3
-      canvas.height = cropH * 3
-      const ctx = canvas.getContext('2d')!
-      // Alto contraste: la pastilla es blanca sobre fondo oscuro
-      ctx.filter = 'contrast(3) brightness(1.5) grayscale(1)'
-      ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height)
-
-      const worker = workerRef.current as {
-        recognize: (img: HTMLCanvasElement) => Promise<{data: {text: string}}>
-        setParameters: (params: Record<string, string>) => Promise<void>
-      }
-
-      await worker.setParameters({
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ',
-        tessedit_pageseg_mode: '11', // modo esparso — busca texto en cualquier lugar
-      })
-
-      const { data: { text } } = await worker.recognize(canvas)
-      setLastRead(text.trim().slice(0, 60))
-
-      const parsed = parseText(text)
-      if (parsed) {
-        if (intervalRef.current) clearInterval(intervalRef.current)
-        setResult(parsed)
-        setStatus('¡Figurita detectada!')
-        setStatusType('success')
-      }
-    } catch (e) {
-      setLastRead(`Error: ${e}`)
-    }
-
-    scanningRef.current = false
-  }, [])
-
   const startCamera = useCallback(async () => {
     const constraints = [
-      { video: { facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+      { video: { facingMode: { exact: 'environment' }, width: { ideal: 1280 } } },
       { video: { facingMode: 'environment' } },
       { video: { facingMode: { ideal: 'environment' } } },
       { video: true }
@@ -157,132 +60,141 @@ export default function Scanner({ state, onDetect, onClose }: ScannerProps) {
           videoRef.current.srcObject = stream
           await videoRef.current.play()
         }
-        // Escanear cada 3 segundos
-        intervalRef.current = setInterval(captureAndScan, 3000)
+        setStatus('Enfocá el código y tocá Capturar')
+        setStatusType('idle')
         return
       } catch {}
     }
     setStatus('No se pudo acceder a la cámara')
     setStatusType('error')
-  }, [captureAndScan])
-
-  useEffect(() => {
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
-    }
   }, [])
 
-  const handleManual = () => {
-    if (!ocrReady) return
-    setStatus('Escaneando...')
+  useEffect(() => {
+    startCamera()
+    return () => {
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
+    }
+  }, [startCamera])
+
+  const capture = useCallback(async () => {
+    if (scanning || !videoRef.current) return
+    const video = videoRef.current
+    if (!video.videoWidth) return
+
+    setScanning(true)
+    setStatus('Analizando...')
     setStatusType('processing')
-    captureAndScan()
-  }
-
-  const handleConfirm = () => {
-    if (!result) return
-    onDetect(result.team, result.num)
-    setResult(null)
     setLastRead('')
-    setStatus('Apuntá al número de la figurita')
-    setStatusType('idle')
-    scanningRef.current = false
-    if (ocrReady) {
-      intervalRef.current = setInterval(captureAndScan, 3000)
-    }
-  }
 
-  const handleRetry = () => {
-    setResult(null)
-    setLastRead('')
-    setStatus('Apuntá al número de la figurita')
-    setStatusType('idle')
-    scanningRef.current = false
-    if (ocrReady) {
-      intervalRef.current = setInterval(captureAndScan, 3000)
-    }
-  }
+    try {
+      // Capturar frame completo — Google Vision puede ver todo
+      const canvas = document.createElement('canvas')
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      canvas.getContext('2d')!.drawImage(video, 0, 0)
+      const base64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1]
 
-  const playerName = result ? (PLAYERS[result.team]?.[result.num] || '') : ''
-  const k = result ? `${result.team}_${result.num}` : ''
-  const v = k ? (state[k] || 0) : 0
-  const subText = v === 0 ? 'No la tenés — se marcará como tengo'
-    : v === 1 ? 'Ya la tenés — se marcará como repetida x1'
-    : `Ya tenés ${v-1} repetida${v > 2 ? 's' : ''} — quedará x${v}`
+      const res = await fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64 })
+      })
+
+      if (!res.ok) {
+        const err = await res.text()
+        setStatus(`Error ${res.status}`)
+        setLastRead(err.slice(0, 80))
+        setStatusType('error')
+        setScanning(false)
+        return
+      }
+
+      const data = await res.json()
+      if (data.error) {
+        setStatus('Error al procesar')
+        setLastRead(data.error.slice(0, 80))
+        setStatusType('error')
+        setScanning(false)
+        return
+      }
+
+      const text = (data.text || '').trim().toUpperCase()
+      setLastRead(`Leyó: "${text}"`)
+
+      if (text && text !== 'NONE') {
+        const parsed = parseText(text)
+        if (parsed) {
+          setStatus('¡Detectado!')
+          setStatusType('success')
+          setTimeout(() => onDetect(parsed.team, parsed.num), 300)
+          return
+        }
+      }
+
+      setStatus('No detecté el código — reintentá')
+      setStatusType('error')
+    } catch (e) {
+      setStatus('Error de conexión')
+      setLastRead(String(e).slice(0, 80))
+      setStatusType('error')
+    }
+
+    setScanning(false)
+  }, [scanning, onDetect])
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-2">
       <div className="bg-white rounded-2xl overflow-hidden w-full max-w-sm flex flex-col max-h-[92vh]">
+        {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900">📷 Escanear figurita</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500">✕</button>
         </div>
 
+        {/* Video */}
         <div className="relative bg-black" style={{ aspectRatio: '3/4' }}>
           <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+
+          {/* Marco esquina superior derecha — donde está el código */}
           <div className="absolute inset-0 pointer-events-none">
-            {/* Marco en esquina superior derecha donde está el código */}
-            <div className="absolute" style={{ top: '8%', right: '5%', width: '42%', height: '20%' }}>
+            <div className="absolute" style={{ top: '6%', right: '4%', width: '44%', height: '18%' }}>
               <div className="absolute inset-0 rounded-xl" style={{
-                border: '2px solid rgba(255,255,255,0.9)',
+                border: '2.5px solid #22c55e',
                 borderRadius: 10,
-                boxShadow: '0 0 0 2000px rgba(0,0,0,0.45)'
+                boxShadow: '0 0 0 2000px rgba(0,0,0,0.5)'
               }} />
               <div className="absolute top-0 left-0 w-5 h-5 border-l-[3px] border-t-[3px] border-green-400 rounded-tl-lg" />
               <div className="absolute bottom-0 right-0 w-5 h-5 border-r-[3px] border-b-[3px] border-green-400 rounded-br-lg" />
             </div>
-            {/* Label */}
-            <div className="absolute text-white text-xs font-semibold bg-black/50 px-2 py-1 rounded-lg" style={{ top: '30%', right: '5%' }}>
-              Apuntá al código ↗
+            <div className="absolute text-white/80 text-xs font-medium bg-black/50 px-2 py-1 rounded-lg" style={{ top: '26%', right: '4%' }}>
+              Código aquí ↗
             </div>
-          </div>
-          <div className="absolute bottom-3 left-0 right-0 flex items-center justify-center gap-2 text-white/90 text-xs">
-            {ocrReady
-              ? <><span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />Intento {attempts}</>
-              : <><span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />Cargando OCR...</>
-            }
           </div>
         </div>
 
-        <div className="p-4 flex flex-col gap-2">
+        {/* Body */}
+        <div className="p-4 flex flex-col gap-3">
           <p className={`text-sm text-center font-medium ${
             statusType === 'success' ? 'text-green-600' :
-            statusType === 'error' ? 'text-red-600' :
+            statusType === 'error'   ? 'text-red-500' :
             statusType === 'processing' ? 'text-amber-600' : 'text-gray-500'
           }`}>{status}</p>
 
-          {lastRead && !result && (
-            <p className="text-xs text-center text-gray-400 bg-gray-50 rounded-lg p-2 break-all">
-              Leyó: &quot;{lastRead}&quot;
-            </p>
+          {lastRead && (
+            <p className="text-xs text-center text-gray-400 bg-gray-50 rounded-lg p-2 break-all">{lastRead}</p>
           )}
 
-          {result && (
-            <div className="rounded-xl border border-gray-200 overflow-hidden">
-              <div className="px-4 py-3">
-                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Figurita detectada</div>
-                <div className="text-base font-bold text-gray-900">
-                  {result.team} {result.num}{playerName ? ` — ${playerName}` : ''}
-                </div>
-                <div className="text-xs text-gray-500 mt-0.5">{subText}</div>
-              </div>
-              <div className="flex border-t border-gray-100">
-                <button onClick={handleConfirm} className="flex-1 py-3 text-sm font-semibold text-green-700 bg-green-50 hover:bg-green-100 transition">✓ Confirmar</button>
-                <button onClick={handleRetry} className="flex-1 py-3 text-sm font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 transition border-l border-gray-100">↺ Seguir</button>
-              </div>
-            </div>
-          )}
+          <button
+            onClick={capture}
+            disabled={scanning}
+            className="w-full py-4 bg-gray-900 text-white rounded-xl text-base font-bold hover:bg-gray-700 active:scale-95 transition disabled:bg-gray-300 disabled:text-gray-500"
+          >
+            {scanning ? '⏳ Procesando...' : '📷 Capturar'}
+          </button>
 
-          {!result && (
-            <button
-              onClick={handleManual}
-              disabled={!ocrReady}
-              className="w-full py-3.5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition disabled:bg-gray-300"
-            >
-              {ocrReady ? '📷 Capturar ahora' : 'Cargando...'}
-            </button>
-          )}
+          <p className="text-xs text-center text-gray-400">
+            Mostrá el reverso de la figurita con el código en la zona verde
+          </p>
         </div>
       </div>
     </div>
