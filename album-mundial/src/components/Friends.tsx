@@ -141,7 +141,7 @@ export default function Friends({ myState, onClose, onMatchCount }: FriendsProps
       <div className="flex border-b border-gray-100">
         {[
           { key: 'matches', label: `🎯 Matches${matches.length > 0 ? ` (${matches.length})` : ''}` },
-          { key: 'friends', label: `👥 Amigos${friends.length > 0 ? ` (${friends.length})` : ''}` },
+          { key: 'friends', label: `👥 Amigos${friends.length > 0 ? ` (${friends.length})` : ''}${pendingReceived.length > 0 ? ` 🔴` : ''}` },
           { key: 'search', label: '🔍 Buscar' },
         ].map(t => (
           <button key={t.key} onClick={() => setView(t.key as typeof view)}
@@ -319,23 +319,30 @@ export default function Friends({ myState, onClose, onMatchCount }: FriendsProps
 
         {/* BUSCAR */}
         {view === 'search' && (
-          <div className="p-4 flex flex-col gap-4">
-            <div className="flex gap-2">
+          <div className="p-4 flex flex-col gap-3">
+            <p className="text-xs text-gray-500">Buscá por nombre, apellido o email. Tu amigo recibirá una solicitud que debe aceptar.</p>
+            <div className="relative">
               <input
                 value={searchQ}
-                onChange={e => setSearchQ(e.target.value)}
+                onChange={e => {
+                  setSearchQ(e.target.value)
+                  if (e.target.value.length >= 2) {
+                    clearTimeout((window as unknown as {_searchTimeout: ReturnType<typeof setTimeout>})._searchTimeout)
+                    ;(window as unknown as {_searchTimeout: ReturnType<typeof setTimeout>})._searchTimeout = setTimeout(() => {
+                      handleSearch()
+                    }, 400)
+                  } else {
+                    setSearchResults([])
+                  }
+                }}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                placeholder="Nombre, apellido o email..."
-                className="flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-gray-400"
+                placeholder="Ej: Federico García o fede@gmail.com"
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-gray-400 pr-10"
                 autoFocus
               />
-              <button
-                onClick={handleSearch}
-                disabled={searching}
-                className="px-4 py-3 bg-gray-900 text-white rounded-xl text-sm font-semibold disabled:bg-gray-300"
-              >
-                {searching ? '...' : 'Buscar'}
-              </button>
+              {searching && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+              )}
             </div>
 
             {searchResults.length > 0 && (
@@ -343,9 +350,10 @@ export default function Friends({ myState, onClose, onMatchCount }: FriendsProps
                 {searchResults.map(p => {
                   const isFriend = friends.some(f => f.id === p.id)
                   const isPendingSent = pendingSent.some(f => f?.id === p.id)
+                  const isPendingReceived = pendingReceived.some(f => f.id === p.id)
                   return (
-                    <div key={p.id} className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
-                      <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-600">
+                    <div key={p.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-3 py-3 shadow-sm">
+                      <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-base font-bold text-gray-600 flex-shrink-0">
                         {p.name?.[0]?.toUpperCase() || '?'}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -353,12 +361,16 @@ export default function Friends({ myState, onClose, onMatchCount }: FriendsProps
                         <div className="text-xs text-gray-400 truncate">{p.email}</div>
                       </div>
                       {isFriend ? (
-                        <span className="text-xs text-green-600 font-semibold">✓ Amigo</span>
+                        <span className="text-xs text-green-600 font-semibold bg-green-50 px-2 py-1 rounded-lg">✓ Amigo</span>
+                      ) : isPendingReceived ? (
+                        <span className="text-xs text-amber-600 font-semibold bg-amber-50 px-2 py-1 rounded-lg">Te mandó solicitud</span>
                       ) : isPendingSent ? (
-                        <span className="text-xs text-gray-400">Pendiente</span>
+                        <span className="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded-lg">Solicitud enviada</span>
                       ) : (
-                        <button onClick={() => sendRequest(p.id)}
-                          className="px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg">
+                        <button
+                          onClick={() => sendRequest(p.id)}
+                          className="px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg hover:bg-gray-700 transition"
+                        >
                           + Agregar
                         </button>
                       )}
@@ -368,8 +380,14 @@ export default function Friends({ myState, onClose, onMatchCount }: FriendsProps
               </div>
             )}
 
-            {searchResults.length === 0 && searchQ && !searching && (
-              <p className="text-sm text-center text-gray-400 py-4">No se encontraron usuarios</p>
+            {searchResults.length === 0 && searchQ.length >= 2 && !searching && (
+              <div className="text-center py-6">
+                <p className="text-sm text-gray-400">No se encontraron usuarios con ese nombre o email</p>
+              </div>
+            )}
+
+            {searchQ.length < 2 && (
+              <div className="text-center py-6 text-gray-300 text-4xl">🔍</div>
             )}
           </div>
         )}
