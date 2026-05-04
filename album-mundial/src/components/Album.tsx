@@ -6,6 +6,7 @@ import { GROUPS, TEAM_FULL, TEAM_ISO, TEAM_GRAD, PLAYERS } from '@/lib/data'
 import type { StickerState } from '@/lib/data'
 import Scanner from './Scanner'
 import StickerCard from './StickerCard'
+import Friends from './Friends'
 
 const GROUP_COLORS: Record<string, { bg: string; text: string; bar: string; border: string }> = {
   'Grupo A': { bg:'#fef2f2', text:'#991b1b', bar:'#ef4444', border:'#fca5a5' },
@@ -35,6 +36,8 @@ export default function Album({ user }: { user: User }) {
   const [showScanner, setShowScanner] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showShare, setShowShare] = useState(false)
+  const [showFriends, setShowFriends] = useState(false)
+  const [matchCount, setMatchCount] = useState(0)
   const [repPopover, setRepPopover] = useState<{ team: string; num: number } | null>(null)
   const [scannedResult, setScannedResult] = useState<ScannedResult | null>(null)
   // Carga rápida
@@ -47,6 +50,13 @@ export default function Album({ user }: { user: User }) {
     fetch('/api/figuritas')
       .then(r => r.json())
       .then(d => { if (d.state) setState(d.state) })
+    // Cargar count de matches
+    fetch('/api/matches')
+      .then(r => r.json())
+      .then(d => {
+        const total = (d.matches || []).reduce((a: number, m: {iCanGive: unknown[], theyCanGive: unknown[]}) => a + m.iCanGive.length + m.theyCanGive.length, 0)
+        setMatchCount(total)
+      })
   }, [])
 
   const saveOne = useCallback(async (team: string, num: number, valor: number) => {
@@ -321,23 +331,31 @@ export default function Album({ user }: { user: User }) {
       </div>
 
       {/* Bottom Nav */}
-      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-gray-100 flex items-center justify-around px-6 z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-gray-100 flex items-center justify-around px-4 z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
         {/* Carga rápida */}
-        <button
-          onClick={() => setShowQuickLoad(true)}
-          className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl hover:bg-gray-50 transition"
-        >
+        <button onClick={() => setShowQuickLoad(true)} className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl hover:bg-gray-50 transition">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
           </svg>
-          <span className="text-[10px] font-semibold text-gray-500">Carga rápida</span>
+          <span className="text-[10px] font-semibold text-gray-500">Rápida</span>
+        </button>
+
+        {/* Amigos */}
+        <button onClick={() => setShowFriends(true)} className="relative flex flex-col items-center gap-1 px-3 py-2 rounded-xl hover:bg-gray-50 transition">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          {matchCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 bg-green-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center">{matchCount > 9 ? '9+' : matchCount}</span>
+          )}
+          <span className="text-[10px] font-semibold text-gray-500">Amigos</span>
         </button>
 
         {/* Escáner — centro */}
-        <button
-          onClick={() => setShowScanner(true)}
-          className="w-14 h-14 rounded-full bg-gray-900 flex items-center justify-center shadow-lg hover:bg-gray-700 transition -mt-5"
-        >
+        <button onClick={() => setShowScanner(true)} className="w-14 h-14 rounded-full bg-gray-900 flex items-center justify-center shadow-lg hover:bg-gray-700 transition -mt-5">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
             <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
@@ -346,10 +364,7 @@ export default function Album({ user }: { user: User }) {
         </button>
 
         {/* Compartir */}
-        <button
-          onClick={() => setShowShare(s => !s)}
-          className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl hover:bg-gray-50 transition"
-        >
+        <button onClick={() => setShowShare(s => !s)} className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl hover:bg-gray-50 transition">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
             <polyline points="16 6 12 2 8 6"/>
@@ -357,6 +372,23 @@ export default function Album({ user }: { user: User }) {
           </svg>
           <span className="text-[10px] font-semibold text-gray-500">Compartir</span>
         </button>
+
+        {/* Menú */}
+        <div className="relative">
+          <button onClick={() => setShowMenu(m => !m)} className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl hover:bg-gray-50 transition">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round">
+              <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+            <span className="text-[10px] font-semibold text-gray-500">Menú</span>
+          </button>
+          {showMenu && (
+            <div className="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[180px] z-50">
+              <button onClick={logout} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 text-gray-600">Cerrar sesión</button>
+              <div className="h-px bg-gray-100" />
+              <button onClick={() => { if (confirm('¿Reiniciar todo el álbum?') && confirm('¿Estás seguro?')) resetAll(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50">Reiniciar álbum</button>
+            </div>
+          )}
+        </div>
       </nav>
 
       {/* Panel compartir */}
@@ -513,6 +545,17 @@ export default function Album({ user }: { user: User }) {
       {/* Scanner */}
       {showScanner && (
         <Scanner state={state} onDetect={handleScanDetect} onClose={() => setShowScanner(false)} />
+      )}
+
+      {/* Friends */}
+      {showFriends && (
+        <Friends onClose={() => {
+          setShowFriends(false)
+          fetch('/api/matches').then(r => r.json()).then(d => {
+            const t = (d.matches || []).reduce((a: number, m: {iCanGive: unknown[], theyCanGive: unknown[]}) => a + m.iCanGive.length + m.theyCanGive.length, 0)
+            setMatchCount(t)
+          })
+        }} />
       )}
     </div>
   )
