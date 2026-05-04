@@ -22,6 +22,8 @@ const GROUP_COLORS: Record<string, { bg: string; text: string; bar: string; bord
   'Especiales': { bg:'#f8fafc', text:'#334155', bar:'#64748b', border:'#cbd5e1' },
 }
 
+interface ScannedResult { team: string; num: number }
+
 export default function Album({ user }: { user: User }) {
   const supabase = createClient()
   const [state, setState] = useState<StickerState>({})
@@ -33,17 +35,19 @@ export default function Album({ user }: { user: User }) {
   const [showScanner, setShowScanner] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [repPopover, setRepPopover] = useState<{ team: string; num: number } | null>(null)
-  const [photoCache, setPhotoCache] = useState<Record<string, string>>({})
- const saveTimeout = useRef<NodeJS.Timeout | undefined>(undefined)
+  const [scannedResult, setScannedResult] = useState<ScannedResult | null>(null)
+  // Carga rápida
+  const [showQuickLoad, setShowQuickLoad] = useState(false)
+  const [quickTeam, setQuickTeam] = useState('')
+  const [quickNums, setQuickNums] = useState('')
+  const saveTimeout = useRef<NodeJS.Timeout | undefined>(undefined)
 
-  // ── Cargar state desde API ──
   useEffect(() => {
     fetch('/api/figuritas')
       .then(r => r.json())
       .then(d => { if (d.state) setState(d.state) })
   }, [])
 
-  // ── Guardar cambio individual ──
   const saveOne = useCallback(async (team: string, num: number, valor: number) => {
     setSaveStatus('saving')
     clearTimeout(saveTimeout.current)
@@ -66,9 +70,10 @@ export default function Album({ user }: { user: User }) {
     const k = stateKey(team, num)
     const v = state[k] || 0
     const newVal = v === 0 ? 1 : 0
-    setState(s => ({ ...s, [k]: newVal }))
     if (newVal === 0) {
-      setState(s => { const n = { ...s }; delete n[k]; return n })
+      setState(s => { const n2 = { ...s }; delete n2[k]; return n2 })
+    } else {
+      setState(s => ({ ...s, [k]: newVal }))
     }
     saveOne(team, num, newVal)
   }
@@ -100,12 +105,44 @@ export default function Album({ user }: { user: User }) {
     saveOne(team, num, newVal)
   }
 
-  const handleScanConfirm = (team: string, num: number) => {
+  // Scanner: cuando detecta cierra el scanner y muestra la figurita
+  const handleScanDetect = (team: string, num: number) => {
+    setShowScanner(false)
+    setScannedResult({ team, num })
+  }
+
+  // Confirmar figurita escaneada
+  const handleScanConfirm = () => {
+    if (!scannedResult) return
+    const { team, num } = scannedResult
     const k = stateKey(team, num)
     const v = state[k] || 0
     const newVal = v === 0 ? 1 : v + 1
     setState(s => ({ ...s, [k]: newVal }))
     saveOne(team, num, newVal)
+    setScannedResult(null)
+    setShowScanner(true) // vuelve al scanner
+  }
+
+  const handleScanCancel = () => {
+    setScannedResult(null)
+    setShowScanner(true) // vuelve al scanner
+  }
+
+  // Carga rápida
+  const handleQuickLoad = () => {
+    if (!quickTeam || !quickNums) return
+    const nums = quickNums.split(/[,\s]+/).map(n => parseInt(n.trim())).filter(n => !isNaN(n) && n >= 1 && n <= 20)
+    if (nums.length === 0) return
+    const updates: Record<string, number> = {}
+    nums.forEach(num => {
+      const k = stateKey(quickTeam, num)
+      const v = state[k] || 0
+      updates[k] = v === 0 ? 1 : v + 1
+      saveOne(quickTeam, num, updates[k])
+    })
+    setState(s => ({ ...s, ...updates }))
+    setQuickNums('')
   }
 
   const logout = async () => {
@@ -113,12 +150,10 @@ export default function Album({ user }: { user: User }) {
     window.location.reload()
   }
 
-  // ── Stats ──
   const total = GROUPS.reduce((a, g) => a + Object.values(g.teams).reduce((b, c) => b + c, 0), 0)
   const tengo = Object.values(state).filter(v => v >= 1).length
   const repetidas = Object.values(state).reduce((a, v) => a + Math.max(0, v - 1), 0)
 
-  // ── Filter logic ──
   const isVisible = (team: string, num: number) => {
     const k = stateKey(team, num)
     const v = state[k] || 0
@@ -136,6 +171,17 @@ export default function Album({ user }: { user: User }) {
   }
 
   const repCount = repPopover ? Math.max(0, (state[stateKey(repPopover.team, repPopover.num)] || 1) - 1) : 0
+
+  // Figurita escaneada — datos
+  const scanTeam = scannedResult?.team || ''
+  const scanNum = scannedResult?.num || 0
+  const scanPlayer = scanTeam && scanNum ? (PLAYERS[scanTeam]?.[scanNum] || '') : ''
+  const scanGrad = scanTeam ? (TEAM_GRAD[scanTeam] || '') : ''
+  const scanIso = scanTeam ? (TEAM_ISO[scanTeam] || null) : null
+  const scanV = scannedResult ? (state[stateKey(scanTeam, scanNum)] || 0) : 0
+  const scanStatus = scanV === 0 ? '✅ Se marcará como tengo'
+    : scanV === 1 ? '🔁 Ya la tenés — quedará como repetida x1'
+    : `🔁 Ya tenés ${scanV-1} repetida${scanV > 2 ? 's' : ''} — quedará x${scanV}`
 
   return (
     <div className="max-w-5xl mx-auto pb-24">
@@ -163,7 +209,6 @@ export default function Album({ user }: { user: User }) {
           </div>
         </div>
 
-        {/* Search + filters */}
         <div className="flex gap-2 mt-3 flex-wrap items-center">
           <input
             value={search} onChange={e => setSearch(e.target.value)}
@@ -171,7 +216,7 @@ export default function Album({ user }: { user: User }) {
             className="flex-1 min-w-[150px] text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-gray-400"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="text-xs bg-gray-100 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-200">✕ Quitar</button>
+            <button onClick={() => setSearch('')} className="text-xs bg-gray-100 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-200">✕</button>
           )}
           {(['all','tengo','falta','repetida'] as const).map(f => (
             <button key={f} onClick={() => setCurFilter(f)}
@@ -195,13 +240,10 @@ export default function Album({ user }: { user: User }) {
           const gc = GROUP_COLORS[g.name] || GROUP_COLORS['Especiales']
           const gid = g.name.replace(/\s/g, '')
           const teamEntries = Object.entries(g.teams)
-
-          // Check if group has anything visible
           const hasVisible = teamEntries.some(([team, count]) =>
             Array.from({ length: count }, (_, i) => i + 1).some(n => isVisible(team, n))
           )
           if ((search || curFilter !== 'all') && !hasVisible) return null
-
           const gTotal = teamEntries.reduce((a, [, c]) => a + c, 0)
           const gHave = teamEntries.reduce((a, [team, count]) =>
             a + Array.from({ length: count }, (_, i) => i + 1).filter(n => (state[stateKey(team, n)] || 0) >= 1).length, 0)
@@ -209,7 +251,6 @@ export default function Album({ user }: { user: User }) {
 
           return (
             <div key={g.name} className="rounded-xl border overflow-hidden" style={{ borderColor: gc.border }}>
-              {/* Group header */}
               <button
                 onClick={() => setCollapsed(c => ({ ...c, [gid]: !c[gid] }))}
                 className="w-full flex items-center justify-between px-4 py-2.5"
@@ -218,7 +259,6 @@ export default function Album({ user }: { user: User }) {
                 <span className="text-sm font-semibold" style={{ color: gc.text }}>{g.name}</span>
                 <span className="text-xs" style={{ color: gc.text }}>{gHave}/{gTotal}</span>
               </button>
-              {/* Progress bar */}
               <div className="h-1 bg-gray-100">
                 <div className="h-1 transition-all" style={{ width: `${pct}%`, background: gc.bar }} />
               </div>
@@ -252,7 +292,7 @@ export default function Album({ user }: { user: User }) {
                                 key={n}
                                 onClick={() => toggleSticker(team, n)}
                                 title={`${team} ${n}${PLAYERS[team]?.[n] ? ' — ' + PLAYERS[team][n] : ''}`}
-                                className="relative flex flex-col items-center justify-end overflow-hidden cursor-default transition-all duration-150"
+                                className="relative flex flex-col items-center justify-end overflow-hidden transition-all duration-150"
                                 style={{
                                   width: 'clamp(70px, calc((100vw - 80px) / 4), 90px)',
                                   height: 'clamp(98px, calc((100vw - 80px) / 4 * 1.4), 126px)',
@@ -268,15 +308,12 @@ export default function Album({ user }: { user: User }) {
                                   cursor: editMode ? 'pointer' : 'default',
                                 }}
                               >
-                                {/* Check */}
                                 {isTengo && !isRep && (
                                   <span className="absolute top-1 right-1.5 text-green-300 text-xs font-black" style={{ textShadow: '0 0 6px rgba(74,222,128,0.8)' }}>✓</span>
                                 )}
-                                {/* Rep badge */}
                                 {isRep && (
                                   <span className="absolute top-0 right-0 bg-amber-400 text-black text-[9px] font-black px-1 py-0.5" style={{ borderRadius: '0 9px 0 6px' }}>x{rep}</span>
                                 )}
-                                {/* Rep button */}
                                 {editMode && isTengo && (
                                   <button
                                     onClick={e => handleRepBtn(team, n, e)}
@@ -286,11 +323,9 @@ export default function Album({ user }: { user: User }) {
                                     {isRep ? `+${rep}` : '+'}
                                   </button>
                                 )}
-                                {/* Num top (no photo) */}
                                 {!isTengo && (
                                   <span className="absolute top-1 left-1.5 text-white text-xs font-black" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>{n}</span>
                                 )}
-                                {/* Band */}
                                 <div className="relative z-10 w-full flex flex-col items-center gap-0.5 pb-1.5 pt-3"
                                   style={{ background: 'linear-gradient(0deg,rgba(0,0,0,0.85) 0%,rgba(0,0,0,0.6) 60%,transparent 100%)' }}>
                                   <span className="text-white font-black leading-none" style={{ fontSize: 18, letterSpacing: -1, textShadow: '0 1px 5px rgba(0,0,0,0.6)' }}>{n}</span>
@@ -331,7 +366,6 @@ export default function Album({ user }: { user: User }) {
           <span className={`text-[10px] font-semibold ${editMode ? 'text-amber-700' : 'text-gray-500'}`}>Editar</span>
         </button>
 
-        {/* Scan button */}
         <button
           onClick={() => setShowScanner(true)}
           className="w-14 h-14 rounded-full bg-gray-900 flex items-center justify-center shadow-lg hover:bg-gray-700 transition -mt-5"
@@ -343,7 +377,6 @@ export default function Album({ user }: { user: User }) {
           </svg>
         </button>
 
-        {/* Menu */}
         <div className="relative">
           <button onClick={() => setShowMenu(m => !m)} className="flex flex-col items-center gap-1 px-5 py-2 rounded-xl hover:bg-gray-50 transition">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -352,7 +385,9 @@ export default function Album({ user }: { user: User }) {
             <span className="text-[10px] font-semibold text-gray-500">Menú</span>
           </button>
           {showMenu && (
-            <div className="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[180px] animate-pop">
+            <div className="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[180px]">
+              <button onClick={() => { setShowQuickLoad(true); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 font-medium text-gray-900">⚡ Carga rápida</button>
+              <div className="h-px bg-gray-100" />
               <button onClick={() => { exportFaltantes(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">Exportar faltantes ↗</button>
               <button onClick={() => { exportRepetidas(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50">Exportar repetidas ↗</button>
               <div className="h-px bg-gray-100" />
@@ -364,13 +399,12 @@ export default function Album({ user }: { user: User }) {
         </div>
       </nav>
 
-      {/* Click outside menu */}
       {showMenu && <div className="fixed inset-0 z-20" onClick={() => setShowMenu(false)} />}
 
       {/* Rep Popover */}
       {repPopover && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setRepPopover(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl p-5 flex flex-col items-center gap-3 min-w-[200px] animate-pop" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl shadow-2xl p-5 flex flex-col items-center gap-3 min-w-[200px]" onClick={e => e.stopPropagation()}>
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Repetidas</div>
             <div className="text-sm font-semibold text-gray-900 text-center max-w-[160px] truncate">
               {repPopover.team} {repPopover.num}{PLAYERS[repPopover.team]?.[repPopover.num] ? ' — ' + PLAYERS[repPopover.team][repPopover.num] : ''}
@@ -388,9 +422,119 @@ export default function Album({ user }: { user: User }) {
         </div>
       )}
 
+      {/* Carga rápida */}
+      {showQuickLoad && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setShowQuickLoad(false)}>
+          <div className="bg-white rounded-t-2xl w-full max-w-md p-5 flex flex-col gap-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-gray-900 text-base">⚡ Carga rápida de sobre</h3>
+              <button onClick={() => setShowQuickLoad(false)} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500">✕</button>
+            </div>
+            <p className="text-xs text-gray-500">Seleccioná el equipo y escribí los números separados por coma. Ej: <span className="font-mono bg-gray-100 px-1 rounded">3, 7, 15, 17</span></p>
+            
+            {/* Selector de equipo */}
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Equipo</label>
+              <div className="grid grid-cols-5 gap-1.5 max-h-48 overflow-y-auto">
+                {Object.keys(PLAYERS).map(team => {
+                  const iso = TEAM_ISO[team]
+                  return (
+                    <button
+                      key={team}
+                      onClick={() => setQuickTeam(team)}
+                      className={`flex flex-col items-center gap-0.5 p-1.5 rounded-lg border text-xs font-bold transition ${
+                        quickTeam === team
+                          ? 'border-gray-900 bg-gray-900 text-white'
+                          : 'border-gray-200 hover:border-gray-400 text-gray-600'
+                      }`}
+                    >
+                      {iso && <img src={`https://flagicons.lipis.dev/flags/4x3/${iso}.svg`} className="w-6 h-4 object-cover rounded-sm" alt={team} onError={e => (e.currentTarget.style.display='none')} />}
+                      <span>{team}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Input de números */}
+            {quickTeam && (
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">
+                  Números de {TEAM_FULL[quickTeam] || quickTeam}
+                </label>
+                <input
+                  value={quickNums}
+                  onChange={e => setQuickNums(e.target.value)}
+                  placeholder="Ej: 3, 7, 15, 17"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-gray-400 font-mono"
+                  autoFocus
+                  onKeyDown={e => { if (e.key === 'Enter') handleQuickLoad() }}
+                />
+              </div>
+            )}
+
+            <button
+              onClick={handleQuickLoad}
+              disabled={!quickTeam || !quickNums}
+              className="w-full py-3.5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition disabled:bg-gray-200 disabled:text-gray-400"
+            >
+              ✓ Marcar figuritas
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Figurita escaneada — modal de confirmación */}
+      {scannedResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-white rounded-2xl overflow-hidden w-full max-w-xs flex flex-col shadow-2xl">
+            {/* Carta grande */}
+            <div className="relative flex flex-col items-center justify-end overflow-hidden" style={{
+              height: 220,
+              background: scanGrad,
+            }}>
+              {scanIso && (
+                <img
+                  src={`https://flagicons.lipis.dev/flags/4x3/${scanIso}.svg`}
+                  className="absolute top-4 left-1/2 -translate-x-1/2 object-cover rounded"
+                  style={{ width: 48, height: 34 }}
+                  alt={scanTeam}
+                  onError={e => (e.currentTarget.style.display='none')}
+                />
+              )}
+              <div className="absolute top-4 right-4 text-white text-4xl font-black" style={{ textShadow: '0 2px 8px rgba(0,0,0,0.5)' }}>{scanNum}</div>
+              <div className="relative z-10 w-full flex flex-col items-center gap-1 pb-4 pt-8"
+                style={{ background: 'linear-gradient(0deg,rgba(0,0,0,0.9) 0%,rgba(0,0,0,0.6) 60%,transparent 100%)' }}>
+                <span className="text-white font-black text-2xl leading-none" style={{ textShadow: '0 1px 5px rgba(0,0,0,0.6)' }}>{scanNum}</span>
+                <span className="text-white font-bold text-base text-center px-4">{scanPlayer || scanTeam}</span>
+                <div className="flex items-center gap-2 mt-1">
+                  {scanIso && <img src={`https://flagicons.lipis.dev/flags/4x3/${scanIso}.svg`} className="object-cover rounded-sm" style={{ width: 20, height: 14 }} alt="" />}
+                  <span className="text-white/80 font-bold text-sm uppercase">{scanTeam} — {TEAM_FULL[scanTeam]}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Info y acciones */}
+            <div className="p-4 flex flex-col gap-3">
+              <p className={`text-sm text-center font-medium ${scanV === 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                {scanStatus}
+              </p>
+              <div className="flex gap-2">
+                <button onClick={handleScanCancel} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">
+                  ✕ Cancelar
+                </button>
+                <button onClick={handleScanConfirm} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-gray-700 transition">
+                  ✓ Confirmar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Scanner */}
       {showScanner && (
-        <Scanner state={state} onConfirm={handleScanConfirm} onClose={() => setShowScanner(false)} />
+        <Scanner state={state} onDetect={handleScanDetect} onClose={() => setShowScanner(false)} />
       )}
     </div>
   )

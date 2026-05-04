@@ -6,7 +6,7 @@ import type { StickerState } from '@/lib/data'
 interface ScanResult { team: string; num: number }
 interface ScannerProps {
   state: StickerState
-  onConfirm: (team: string, num: number) => void
+  onDetect: (team: string, num: number) => void
   onClose: () => void
 }
 
@@ -18,7 +18,7 @@ const TEAMS = [
   'FWC','OO','CC'
 ]
 
-export default function Scanner({ state, onConfirm, onClose }: ScannerProps) {
+export default function Scanner({ state, onDetect, onClose }: ScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
@@ -179,7 +179,7 @@ export default function Scanner({ state, onConfirm, onClose }: ScannerProps) {
 
   const handleConfirm = () => {
     if (!result) return
-    onConfirm(result.team, result.num)
+    onDetect(result.team, result.num)
     setResult(null)
     setLastRead('')
     setStatus('Apuntá al número de la figurita')
