@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import { GROUPS, TEAM_FULL, TEAM_ISO, TEAM_GRAD, PLAYERS } from '@/lib/data'
 import type { StickerState } from '@/lib/data'
 import Scanner from './Scanner'
+import StickerCard from './StickerCard'
 
 const GROUP_COLORS: Record<string, { bg: string; text: string; bar: string; border: string }> = {
   'Grupo A': { bg:'#fef2f2', text:'#991b1b', bar:'#ef4444', border:'#fca5a5' },
@@ -283,63 +284,16 @@ export default function Album({ user }: { user: User }) {
                             if ((search || curFilter !== 'all') && !isVisible(team, n)) return null
                             const k = stateKey(team, n)
                             const v = state[k] || 0
-                            const isTengo = v >= 1
-                            const isRep = v >= 2
-                            const rep = v - 1
-
                             return (
-                              <div
+                              <StickerCard
                                 key={n}
+                                team={team}
+                                num={n}
+                                valor={v}
+                                editMode={editMode}
                                 onClick={() => toggleSticker(team, n)}
-                                title={`${team} ${n}${PLAYERS[team]?.[n] ? ' — ' + PLAYERS[team][n] : ''}`}
-                                className="relative flex flex-col items-center justify-end overflow-hidden transition-all duration-150"
-                                style={{
-                                  width: 'clamp(70px, calc((100vw - 80px) / 4), 90px)',
-                                  height: 'clamp(98px, calc((100vw - 80px) / 4 * 1.4), 126px)',
-                                  borderRadius: 10,
-                                  background: grad,
-                                  border: isTengo
-                                    ? isRep ? '3px solid #d97706' : '3px solid #16a34a'
-                                    : '2px solid rgba(0,0,0,0.08)',
-                                  boxShadow: isTengo
-                                    ? isRep ? '0 0 0 1px #d97706, 0 3px 10px rgba(217,119,6,0.25)' : '0 0 0 1px #16a34a, 0 3px 10px rgba(22,163,74,0.2)'
-                                    : '0 1px 3px rgba(0,0,0,0.1)',
-                                  filter: isTengo ? 'none' : 'brightness(0.55) saturate(0.15) grayscale(0.4)',
-                                  cursor: editMode ? 'pointer' : 'default',
-                                }}
-                              >
-                                {isTengo && !isRep && (
-                                  <span className="absolute top-1 right-1.5 text-green-300 text-xs font-black" style={{ textShadow: '0 0 6px rgba(74,222,128,0.8)' }}>✓</span>
-                                )}
-                                {isRep && (
-                                  <span className="absolute top-0 right-0 bg-amber-400 text-black text-[9px] font-black px-1 py-0.5" style={{ borderRadius: '0 9px 0 6px' }}>x{rep}</span>
-                                )}
-                                {editMode && isTengo && (
-                                  <button
-                                    onClick={e => handleRepBtn(team, n, e)}
-                                    className="absolute top-1.5 left-1.5 bg-black/60 text-amber-300 text-[9px] font-black px-1.5 py-0.5 rounded-md border border-amber-500/70 z-10"
-                                    style={{ lineHeight: 1 }}
-                                  >
-                                    {isRep ? `+${rep}` : '+'}
-                                  </button>
-                                )}
-                                {!isTengo && (
-                                  <span className="absolute top-1 left-1.5 text-white text-xs font-black" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>{n}</span>
-                                )}
-                                <div className="relative z-10 w-full flex flex-col items-center gap-0.5 pb-1.5 pt-3"
-                                  style={{ background: 'linear-gradient(0deg,rgba(0,0,0,0.85) 0%,rgba(0,0,0,0.6) 60%,transparent 100%)' }}>
-                                  <span className="text-white font-black leading-none" style={{ fontSize: 18, letterSpacing: -1, textShadow: '0 1px 5px rgba(0,0,0,0.6)' }}>{n}</span>
-                                  {PLAYERS[team]?.[n] && (
-                                    <span className="text-white/90 font-semibold text-center leading-tight" style={{ fontSize: 6.5, maxWidth: 54, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textShadow: '0 1px 2px rgba(0,0,0,0.9)' }}>
-                                      {PLAYERS[team][n]}
-                                    </span>
-                                  )}
-                                  <div className="flex items-center gap-1">
-                                    {iso && <img src={`https://flagicons.lipis.dev/flags/4x3/${iso}.svg`} className="object-cover rounded-sm" style={{ width: 14, height: 10 }} alt="" onError={e => (e.currentTarget.style.display='none')} />}
-                                    <span className="text-white/80 font-bold uppercase" style={{ fontSize: 6.5, letterSpacing: '0.06em' }}>{team}</span>
-                                  </div>
-                                </div>
-                              </div>
+                                onRepClick={(e) => handleRepBtn(team, n, e)}
+                              />
                             )
                           })}
                         </div>
