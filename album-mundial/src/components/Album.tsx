@@ -138,7 +138,7 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
   }
 
   // Confirmar figurita escaneada
-  const handleScanConfirm = () => {
+  const handleScanConfirm = (keepScanning: boolean) => {
     if (!scannedResult) return
     const { team, num } = scannedResult
     const k = stateKey(team, num)
@@ -148,7 +148,7 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
     if (v === 0) saveOne(team, num, 1)
     else saveDelta(team, num, 1)
     setScannedResult(null)
-    setShowScanner(true) // vuelve al scanner
+    setShowScanner(keepScanning)
   }
 
   const handleScanCancel = () => {
@@ -572,11 +572,14 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
                 {scanStatus}
               </p>
               <div className="flex gap-2">
-                <button onClick={handleScanCancel} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">
-                  ✕ Cancelar
+                <button onClick={handleScanCancel} className="py-3 px-4 rounded-xl border border-gray-200 text-sm font-semibold text-gray-500 hover:bg-gray-50 transition">
+                  ✕
                 </button>
-                <button onClick={handleScanConfirm} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-gray-700 transition">
-                  ✓ Confirmar
+                <button onClick={() => handleScanConfirm(false)} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-gray-700 transition">
+                  ✓ Sí
+                </button>
+                <button onClick={() => handleScanConfirm(true)} className="flex-1 py-3 rounded-xl bg-gray-600 text-white text-sm font-semibold hover:bg-gray-500 transition">
+                  📷 Otra
                 </button>
               </div>
             </div>
