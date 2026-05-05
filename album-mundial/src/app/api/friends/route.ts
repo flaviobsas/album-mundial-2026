@@ -40,9 +40,9 @@ export async function GET() {
   const pending = friendships.filter(f => f.status === 'pending')
 
   // Obtener IDs de amigos
-  const friendIds = [...new Set(accepted.map(f =>
+  const friendIds = Array.from(new Set(accepted.map(f =>
     f.requester_id === user.id ? f.addressee_id : f.requester_id
-  ))]
+  )))
   const pendingReceivedIds = pending
     .filter(f => f.addressee_id === user.id)
     .map(f => ({ id: f.requester_id, friendshipId: f.id }))
