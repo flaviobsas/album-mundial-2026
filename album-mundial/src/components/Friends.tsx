@@ -42,7 +42,8 @@ export default function Friends({ myState, onClose, onMatchCount }: FriendsProps
   const [searchResults, setSearchResults] = useState<Profile[]>([])
   const [searching, setSearching] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState<'matches'|'friends'|'search'>('matches')
+  const [view, setView] = useState<'friends'|'search'>('friends')
+  const [expandedFriendId, setExpandedFriendId] = useState<string | null>(null)
 
   const stateKey = (t: string, n: number) => `${t}_${n}`
 
@@ -124,9 +125,6 @@ export default function Friends({ myState, onClose, onMatchCount }: FriendsProps
     loadFriends()
   }
 
-  const givingMatches = matches.filter(m => m.type === 'give')
-  const receivingMatches = matches.filter(m => m.type === 'receive')
-
   const iso = (team: string) => TEAM_ISO[team]
 
   return (
@@ -140,7 +138,6 @@ export default function Friends({ myState, onClose, onMatchCount }: FriendsProps
       {/* Tabs */}
       <div className="flex border-b border-gray-100">
         {[
-          { key: 'matches', label: `🎯 Matches${matches.length > 0 ? ` (${matches.length})` : ''}` },
           { key: 'friends', label: `👥 Amigos${friends.length > 0 ? ` (${friends.length})` : ''}${pendingReceived.length > 0 ? ` 🔴` : ''}` },
           { key: 'search', label: '🔍 Buscar' },
         ].map(t => (
@@ -154,73 +151,6 @@ export default function Friends({ myState, onClose, onMatchCount }: FriendsProps
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* MATCHES */}
-        {view === 'matches' && (
-          <div className="p-4 flex flex-col gap-4">
-            {loading && <p className="text-sm text-center text-gray-400 py-8">Calculando matches...</p>}
-
-            {!loading && friends.length === 0 && (
-              <div className="text-center py-12">
-                <div className="text-4xl mb-3">👥</div>
-                <p className="text-sm font-semibold text-gray-700">Todavía no tenés amigos</p>
-                <p className="text-xs text-gray-400 mt-1">Buscalos en la pestaña "Buscar"</p>
-              </div>
-            )}
-
-            {!loading && friends.length > 0 && matches.length === 0 && (
-              <div className="text-center py-12">
-                <div className="text-4xl mb-3">🎯</div>
-                <p className="text-sm font-semibold text-gray-700">No hay matches por ahora</p>
-                <p className="text-xs text-gray-400 mt-1">Los matches aparecen cuando podés darle o pedirle una figurita a un amigo</p>
-              </div>
-            )}
-
-            {givingMatches.length > 0 && (
-              <div>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">📤 Podés darle a un amigo ({givingMatches.length})</h3>
-                <div className="flex flex-col gap-2">
-                  {givingMatches.map((m, i) => (
-                    <div key={i} className="flex items-center gap-3 bg-green-50 border border-green-100 rounded-xl px-3 py-2.5">
-                      {iso(m.team) && (
-                        <img src={`https://flagicons.lipis.dev/flags/4x3/${iso(m.team)}.svg`}
-                          className="w-8 h-6 object-cover rounded-sm flex-shrink-0" alt={m.team}
-                          onError={e => (e.currentTarget.style.display='none')} />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-bold text-gray-900">{m.team} {m.num} — {m.playerName}</div>
-                        <div className="text-xs text-green-700">Para <span className="font-semibold">{m.friendName}</span></div>
-                      </div>
-                      <span className="text-green-600 text-lg">✓</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {receivingMatches.length > 0 && (
-              <div>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">📥 Podés pedirle a un amigo ({receivingMatches.length})</h3>
-                <div className="flex flex-col gap-2">
-                  {receivingMatches.map((m, i) => (
-                    <div key={i} className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5">
-                      {iso(m.team) && (
-                        <img src={`https://flagicons.lipis.dev/flags/4x3/${iso(m.team)}.svg`}
-                          className="w-8 h-6 object-cover rounded-sm flex-shrink-0" alt={m.team}
-                          onError={e => (e.currentTarget.style.display='none')} />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-bold text-gray-900">{m.team} {m.num} — {m.playerName}</div>
-                        <div className="text-xs text-blue-700"><span className="font-semibold">{m.friendName}</span> la tiene repetida</div>
-                      </div>
-                      <span className="text-blue-500 text-lg">↓</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* AMIGOS */}
         {view === 'friends' && (
           <div className="p-4 flex flex-col gap-4">
@@ -255,7 +185,8 @@ export default function Friends({ myState, onClose, onMatchCount }: FriendsProps
             )}
 
             {/* Amigos aceptados */}
-            {friends.length > 0 && (
+            {loading && <p className="text-sm text-center text-gray-400 py-8">Cargando...</p>}
+            {!loading && friends.length > 0 && (
               <div>
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Mis amigos ({friends.length})</h3>
                 <div className="flex flex-col gap-2">
@@ -263,19 +194,72 @@ export default function Friends({ myState, onClose, onMatchCount }: FriendsProps
                     const fTotal = Object.values(f.figuritas || {}).filter(v => v >= 1).length
                     const fRep = Object.values(f.figuritas || {}).reduce((a, v) => a + Math.max(0, v-1), 0)
                     const myMatchCount = matches.filter(m => m.friendId === f.id).length
+                    const isExpanded = expandedFriendId === f.id
+                    const friendGive = isExpanded ? matches.filter(m => m.friendId === f.id && m.type === 'give') : []
+                    const friendReceive = isExpanded ? matches.filter(m => m.friendId === f.id && m.type === 'receive') : []
                     return (
-                      <div key={f.id} className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
-                        <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-600">
-                          {f.name?.[0]?.toUpperCase() || '?'}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-bold text-gray-900 truncate">{f.name}</div>
-                          <div className="text-xs text-gray-400">{fTotal} figuritas · {fRep} repetidas</div>
-                        </div>
-                        {myMatchCount > 0 && (
-                          <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded-full">
-                            {myMatchCount} match{myMatchCount !== 1 ? 'es' : ''}
-                          </span>
+                      <div key={f.id} className="border border-gray-200 rounded-xl overflow-hidden">
+                        <button
+                          className="w-full flex items-center gap-3 bg-gray-50 px-3 py-2.5 text-left"
+                          onClick={() => setExpandedFriendId(isExpanded ? null : f.id)}
+                        >
+                          <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-600 flex-shrink-0">
+                            {f.name?.[0]?.toUpperCase() || '?'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-bold text-gray-900 truncate">{f.name}</div>
+                            <div className="text-xs text-gray-400">{fTotal} figuritas · {fRep} repetidas</div>
+                          </div>
+                          {myMatchCount > 0 && (
+                            <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0">
+                              {myMatchCount} 🎯
+                            </span>
+                          )}
+                          <span className="text-gray-300 text-xs flex-shrink-0">{isExpanded ? '▲' : '▼'}</span>
+                        </button>
+
+                        {isExpanded && (
+                          <div className="border-t border-gray-200 bg-white px-3 py-3 flex flex-col gap-3">
+                            {myMatchCount === 0 && (
+                              <p className="text-xs text-gray-400 text-center py-1">Sin matches con {f.name}</p>
+                            )}
+                            {friendGive.length > 0 && (
+                              <div>
+                                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">📤 Podés darle ({friendGive.length})</p>
+                                <div className="flex flex-col gap-1.5">
+                                  {friendGive.map((m, i) => (
+                                    <div key={i} className="flex items-center gap-2 bg-green-50 rounded-lg px-2.5 py-2">
+                                      {iso(m.team) && (
+                                        <img src={`https://flagicons.lipis.dev/flags/4x3/${iso(m.team)}.svg`}
+                                          className="w-6 h-4 object-cover rounded-sm flex-shrink-0" alt={m.team}
+                                          onError={e => (e.currentTarget.style.display = 'none')} />
+                                      )}
+                                      <span className="text-xs font-semibold text-gray-800 flex-shrink-0">{m.team} {m.num}</span>
+                                      <span className="text-xs text-gray-500 truncate">{m.playerName}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {friendReceive.length > 0 && (
+                              <div>
+                                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">📥 Te puede dar ({friendReceive.length})</p>
+                                <div className="flex flex-col gap-1.5">
+                                  {friendReceive.map((m, i) => (
+                                    <div key={i} className="flex items-center gap-2 bg-blue-50 rounded-lg px-2.5 py-2">
+                                      {iso(m.team) && (
+                                        <img src={`https://flagicons.lipis.dev/flags/4x3/${iso(m.team)}.svg`}
+                                          className="w-6 h-4 object-cover rounded-sm flex-shrink-0" alt={m.team}
+                                          onError={e => (e.currentTarget.style.display = 'none')} />
+                                      )}
+                                      <span className="text-xs font-semibold text-gray-800 flex-shrink-0">{m.team} {m.num}</span>
+                                      <span className="text-xs text-gray-500 truncate">{m.playerName}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     )
