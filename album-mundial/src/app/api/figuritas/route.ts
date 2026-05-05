@@ -45,8 +45,25 @@ export async function POST(req: NextRequest) {
     await supabase.from('figuritas').delete().eq('user_id', user.id)
     return NextResponse.json({ ok: true })
   }
-  const { team, num, valor } = body
-  if (valor === 0) {
+  const { team, num, valor, delta } = body
+  if (delta !== undefined) {
+    const { data: row } = await supabase
+      .from('figuritas')
+      .select('valor')
+      .eq('user_id', user.id)
+      .eq('team', team)
+      .eq('num', num)
+      .maybeSingle()
+    const newValor = Math.max(0, (row?.valor ?? 0) + delta)
+    if (newValor === 0) {
+      await supabase.from('figuritas').delete().eq('user_id', user.id).eq('team', team).eq('num', num)
+    } else {
+      await supabase.from('figuritas').upsert(
+        { user_id: user.id, team, num, valor: newValor, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id,team,num' }
+      )
+    }
+  } else if (valor === 0) {
     await supabase.from('figuritas').delete().eq('user_id', user.id).eq('team', team).eq('num', num)
   } else {
     await supabase.from('figuritas').upsert(

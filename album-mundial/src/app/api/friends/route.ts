@@ -97,6 +97,20 @@ export async function POST(req: NextRequest) {
 
   if (body.action === 'request') {
     const { addressee_id } = body
+
+    const { data: existing } = await supabase
+      .from('friendships')
+      .select('id, requester_id, status')
+      .or(`and(requester_id.eq.${user.id},addressee_id.eq.${addressee_id}),and(requester_id.eq.${addressee_id},addressee_id.eq.${user.id})`)
+      .maybeSingle()
+
+    if (existing) {
+      if (existing.requester_id === addressee_id && existing.status === 'pending') {
+        await supabase.from('friendships').update({ status: 'accepted' }).eq('id', existing.id)
+      }
+      return NextResponse.json({ ok: true })
+    }
+
     const { error } = await supabase
       .from('friendships')
       .insert({ requester_id: user.id, addressee_id, status: 'pending' })

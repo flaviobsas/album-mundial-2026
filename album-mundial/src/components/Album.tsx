@@ -76,6 +76,21 @@ export default function Album({ user, hasProfile }: { user: User; hasProfile: bo
     }, 400)
   }, [])
 
+  const saveDelta = useCallback(async (team: string, num: number, delta: number) => {
+    setSaveStatus('saving')
+    clearTimeout(saveTimeout.current)
+    saveTimeout.current = setTimeout(async () => {
+      try {
+        await fetch('/api/figuritas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ team, num, delta })
+        })
+        setSaveStatus('saved')
+      } catch { setSaveStatus('error') }
+    }, 400)
+  }, [])
+
   const stateKey = (t: string, n: number) => `${t}_${n}`
 
   const toggleSticker = (team: string, num: number) => {
@@ -98,7 +113,7 @@ export default function Album({ user, hasProfile }: { user: User; hasProfile: bo
     if (rep === 0) {
       const newVal = 2
       setState(s => ({ ...s, [k]: newVal }))
-      saveOne(team, num, newVal)
+      saveDelta(team, num, 1)
     } else {
       setRepPopover({ team, num })
     }
@@ -113,7 +128,7 @@ export default function Album({ user, hasProfile }: { user: User; hasProfile: bo
     const newRep = Math.max(0, Math.min(5, rep + delta))
     const newVal = newRep + 1
     setState(s => ({ ...s, [k]: newVal }))
-    saveOne(team, num, newVal)
+    if (newVal !== v) saveDelta(team, num, delta)
   }
 
   // Scanner: cuando detecta cierra el scanner y muestra la figurita
@@ -130,7 +145,8 @@ export default function Album({ user, hasProfile }: { user: User; hasProfile: bo
     const v = state[k] || 0
     const newVal = v === 0 ? 1 : v + 1
     setState(s => ({ ...s, [k]: newVal }))
-    saveOne(team, num, newVal)
+    if (v === 0) saveOne(team, num, 1)
+    else saveDelta(team, num, 1)
     setScannedResult(null)
     setShowScanner(true) // vuelve al scanner
   }
@@ -150,7 +166,8 @@ export default function Album({ user, hasProfile }: { user: User; hasProfile: bo
       const k = stateKey(quickTeam, num)
       const v = state[k] || 0
       updates[k] = v === 0 ? 1 : v + 1
-      saveOne(quickTeam, num, updates[k])
+      if (v === 0) saveOne(quickTeam, num, 1)
+      else saveDelta(quickTeam, num, 1)
     })
     setState(s => ({ ...s, ...updates }))
     setQuickNums('')
