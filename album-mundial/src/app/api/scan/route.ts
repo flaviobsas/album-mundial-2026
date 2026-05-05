@@ -1,12 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const TEAMS = [
-  'MEX','RSA','KOR','CZE','CAN','BIH','QAT','SUI','BRA','MAR','HAI','SCO',
-  'USA','PAR','AUS','TUR','GER','CUW','CIV','ECU','NED','JPN','SWE','TUN',
-  'BEL','EGV','IRN','NZL','ESP','CPV','KSA','URU','FRA','SEN','IRQ','NOR',
-  'ARG','ALG','AUT','JOR','POR','COD','UZB','COL','ENG','CRO','GHA','PAN',
-  'FWC','OO','CC'
-]
+import { parseStickerText } from '@/lib/parseSticker'
 
 export async function POST(req: NextRequest) {
   try {
@@ -39,20 +32,9 @@ export async function POST(req: NextRequest) {
     const fullText = data.responses?.[0]?.fullTextAnnotation?.text ||
                      data.responses?.[0]?.textAnnotations?.[0]?.description || ''
 
-    // Buscar código de figurita en el texto
-    const upper = fullText.toUpperCase().replace(/[^A-Z0-9\s\n]/g, ' ')
-
-    for (const team of TEAMS) {
-      const patterns = [
-        new RegExp(`\\b${team}\\s*(\\d{1,2})\\b`),
-        new RegExp(`${team}\\D{0,2}(\\d{1,2})`),
-      ]
-      for (const pat of patterns) {
-        const m = upper.match(pat)
-        if (m) {
-          return NextResponse.json({ text: `${team} ${m[1]}`, raw: fullText })
-        }
-      }
+    const parsed = parseStickerText(fullText)
+    if (parsed) {
+      return NextResponse.json({ text: `${parsed.team} ${parsed.num}`, raw: fullText })
     }
 
     return NextResponse.json({ text: 'NONE', raw: fullText })

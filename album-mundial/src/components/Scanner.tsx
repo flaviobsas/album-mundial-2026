@@ -1,7 +1,7 @@
 'use client'
 import { useRef, useState, useCallback, useEffect } from 'react'
-import { GROUPS } from '@/lib/data'
 import type { StickerState } from '@/lib/data'
+import { parseStickerText } from '@/lib/parseSticker'
 
 interface ScanResult { team: string; num: number }
 interface ScannerProps {
@@ -10,32 +10,6 @@ interface ScannerProps {
   onClose: () => void
 }
 
-const TEAMS = [
-  'MEX','RSA','KOR','CZE','CAN','BIH','QAT','SUI','BRA','MAR','HAI','SCO',
-  'USA','PAR','AUS','TUR','GER','CUW','CIV','ECU','NED','JPN','SWE','TUN',
-  'BEL','EGV','IRN','NZL','ESP','CPV','KSA','URU','FRA','SEN','IRQ','NOR',
-  'ARG','ALG','AUT','JOR','POR','COD','UZB','COL','ENG','CRO','GHA','PAN',
-  'FWC','OO','CC'
-]
-
-function parseText(text: string): ScanResult | null {
-  const upper = text.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ')
-  for (const team of TEAMS) {
-    const patterns = [
-      new RegExp(`\\b${team}\\s*(\\d{1,2})\\b`),
-      new RegExp(`${team}\\D{0,2}(\\d{1,2})`),
-    ]
-    for (const pat of patterns) {
-      const m = upper.match(pat)
-      if (m) {
-        const num = parseInt(m[1])
-        const groupEntry = GROUPS.flatMap(g => Object.entries(g.teams)).find(([t]) => t === team)
-        if (groupEntry && num >= 1 && num <= groupEntry[1]) return { team, num }
-      }
-    }
-  }
-  return null
-}
 
 async function callVision(base64: string): Promise<string> {
   const res = await fetch('/api/scan', {
@@ -88,7 +62,7 @@ export default function Scanner({ onDetect, onClose }: ScannerProps) {
       const base64 = captureFrame(videoRef.current!)
       const text = await callVision(base64)
       if (text && text !== 'NONE') {
-        const parsed = parseText(text)
+        const parsed = parseStickerText(text)
         if (parsed) { handleDetected(parsed); return }
       }
     } catch {}
@@ -106,7 +80,7 @@ export default function Scanner({ onDetect, onClose }: ScannerProps) {
       const base64 = captureFrame(videoRef.current!)
       const text = await callVision(base64)
       if (text && text !== 'NONE') {
-        const parsed = parseText(text)
+        const parsed = parseStickerText(text)
         if (parsed) { handleDetected(parsed); return }
         setStatus(`Leyó "${text}" — no coincide. Reintentá.`)
       } else {
