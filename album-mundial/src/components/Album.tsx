@@ -27,7 +27,7 @@ const GROUP_COLORS: Record<string, { bg: string; text: string; bar: string; bord
 
 interface ScannedResult { team: string; num: number }
 
-export default function Album({ user, hasProfile }: { user: User; hasProfile: boolean }) {
+export default function Album({ user, hasProfile, userName }: { user: User; hasProfile: boolean; userName: string }) {
   const supabase = createClient()
   const [profileComplete, setProfileComplete] = useState(hasProfile)
   const [state, setState] = useState<StickerState>({})
@@ -221,7 +221,7 @@ export default function Album({ user, hasProfile }: { user: User; hasProfile: bo
       <div className="sticky top-0 z-40 bg-white border-b border-gray-100 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-lg font-bold text-gray-900">Álbum Copa 2026 🏆</h1>
+            <h1 className="text-lg font-bold text-gray-900">Álbum Copa 2026{userName ? ` — ${userName}` : ''} 🏆</h1>
             <p className={`text-xs mt-0.5 ${saveStatus === 'saved' ? 'text-green-600' : saveStatus === 'error' ? 'text-red-500' : 'text-amber-500'}`}>
               {saveStatus === 'saved' ? '● Guardado' : saveStatus === 'saving' ? '● Guardando...' : '● Error al guardar'}
             </p>

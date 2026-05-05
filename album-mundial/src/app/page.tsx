@@ -10,9 +10,9 @@ export default async function Home() {
   // Verificar si tiene perfil
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id')
+    .select('id, name')
     .eq('id', user.id)
     .single()
 
-  return <Album user={user} hasProfile={!!profile} />
+  return <Album user={user} hasProfile={!!profile} userName={profile?.name ?? ''} />
 }
