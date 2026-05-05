@@ -2,8 +2,8 @@ import { GROUPS } from '@/lib/data'
 
 const teamLimits: Record<string, number> = {}
 GROUPS.forEach(g => {
-  Object.entries(g.teams).forEach(([team, count]) => {
-    teamLimits[team] = count as number
+  Object.entries(g.teams as Record<string, number>).forEach(([team, count]) => {
+    teamLimits[team] = count
   })
 })
 
