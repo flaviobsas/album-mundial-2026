@@ -1,0 +1,210 @@
+'use client'
+import { useRef, useState, useCallback, useEffect } from 'react'
+import { PLAYERS, TEAM_FULL, TEAM_ISO } from '@/lib/data'
+import type { StickerState } from '@/lib/data'
+
+interface DetectedSticker {
+  team: string
+  num: number
+  selected: boolean
+}
+
+interface BatchScannerProps {
+  state: StickerState
+  onConfirm: (stickers: { team: string; num: number }[]) => void
+  onClose: () => void
+}
+
+function captureFrame(video: HTMLVideoElement): string {
+  const canvas = document.createElement('canvas')
+  canvas.width = video.videoWidth
+  canvas.height = video.videoHeight
+  canvas.getContext('2d')!.drawImage(video, 0, 0)
+  return canvas.toDataURL('image/jpeg', 0.92).split(',')[1]
+}
+
+export default function BatchScanner({ state, onConfirm, onClose }: BatchScannerProps) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const [detected, setDetected] = useState<DetectedSticker[]>([])
+  const [scanning, setScanning] = useState(false)
+  const [status, setStatus] = useState('Iniciando cámara...')
+  const [cameraReady, setCameraReady] = useState(false)
+
+  const stopStream = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
+  }
+
+  const startCamera = useCallback(async () => {
+    setCameraReady(false)
+    const constraints = [
+      { video: { facingMode: { exact: 'environment' }, width: { ideal: 1920 } } },
+      { video: { facingMode: 'environment' } },
+      { video: true },
+    ]
+    for (const c of constraints) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(c)
+        streamRef.current = stream
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          await videoRef.current.play()
+        }
+        setStatus('Enfocá las figuritas y capturá')
+        setCameraReady(true)
+        return
+      } catch {}
+    }
+    setStatus('No se pudo acceder a la cámara')
+  }, [])
+
+  useEffect(() => {
+    startCamera()
+    return () => stopStream()
+  }, [startCamera])
+
+  const capture = useCallback(async () => {
+    if (!videoRef.current?.videoWidth || scanning) return
+    setScanning(true)
+    setStatus('Analizando...')
+    try {
+      const base64 = captureFrame(videoRef.current!)
+      const res = await fetch('/api/scan-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64 }),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      const stickers: { team: string; num: number }[] = data.stickers || []
+      if (stickers.length === 0) {
+        setStatus('No detecté figuritas. Reintentá.')
+        setScanning(false)
+        return
+      }
+      stopStream()
+      setDetected(stickers.map(s => ({ ...s, selected: true })))
+    } catch (e) {
+      setStatus(`Error: ${e}`)
+    }
+    setScanning(false)
+  }, [scanning])
+
+  const toggle = (idx: number) => {
+    setDetected(d => d.map((s, i) => i === idx ? { ...s, selected: !s.selected } : s))
+  }
+
+  const retry = () => {
+    setDetected([])
+    setStatus('Enfocá las figuritas y capturá')
+    startCamera()
+  }
+
+  const selectedCount = detected.filter(s => s.selected).length
+
+  const confirm = () => {
+    onConfirm(detected.filter(s => s.selected).map(({ team, num }) => ({ team, num })))
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-2">
+      <div className="bg-white rounded-2xl overflow-hidden w-full max-w-sm flex flex-col max-h-[92vh]">
+
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-900">📷 Escanear varias</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500">✕</button>
+        </div>
+
+        {detected.length === 0 ? (
+          <>
+            <div className="relative bg-black" style={{ aspectRatio: '4/3' }}>
+              <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+              {scanning && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                  <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+                </div>
+              )}
+            </div>
+            <div className="p-4 flex flex-col gap-3">
+              <p className="text-sm text-center text-gray-500">{status}</p>
+              <button
+                onClick={capture}
+                disabled={!cameraReady || scanning}
+                className="w-full py-4 bg-gray-900 text-white rounded-xl text-base font-bold hover:bg-gray-700 active:scale-95 transition disabled:bg-gray-300"
+              >
+                {scanning ? '⏳ Analizando...' : '📷 Capturar'}
+              </button>
+              <p className="text-xs text-center text-gray-400">Podés poner varias figuritas juntas en la foto</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-700">{selectedCount} seleccionada{selectedCount !== 1 ? 's' : ''}</span>
+              <button onClick={retry} className="text-xs text-gray-400 underline">Volver a escanear</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+              {detected.map((s, i) => {
+                const playerName = PLAYERS[s.team]?.[s.num] || `${s.team} ${s.num}`
+                const iso = TEAM_ISO[s.team]
+                const current = state[`${s.team}_${s.num}`] || 0
+                return (
+                  <button
+                    key={i}
+                    onClick={() => toggle(i)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition ${
+                      s.selected
+                        ? 'bg-gray-900 border-gray-900'
+                        : 'bg-white border-gray-200'
+                    }`}
+                  >
+                    {iso && (
+                      <img
+                        src={`https://flagicons.lipis.dev/flags/4x3/${iso}.svg`}
+                        className="w-8 h-6 object-cover rounded-sm flex-shrink-0"
+                        alt={s.team}
+                        onError={e => (e.currentTarget.style.display = 'none')}
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-sm font-bold ${s.selected ? 'text-white' : 'text-gray-900'}`}>
+                        {s.team} {s.num} — {TEAM_FULL[s.team] || s.team}
+                      </div>
+                      <div className={`text-xs truncate ${s.selected ? 'text-gray-400' : 'text-gray-400'}`}>
+                        {playerName}
+                      </div>
+                    </div>
+                    {current > 0 && (
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                        s.selected ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'
+                      }`}>
+                        {current === 1 ? 'ya tenés' : `×${current}`}
+                      </span>
+                    )}
+                    <span className={`text-base flex-shrink-0 ${s.selected ? 'text-white' : 'text-gray-300'}`}>
+                      {s.selected ? '✓' : '○'}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="p-4 border-t border-gray-100">
+              <button
+                onClick={confirm}
+                disabled={selectedCount === 0}
+                className="w-full py-3 bg-gray-900 text-white rounded-xl text-sm font-bold hover:bg-gray-700 transition disabled:bg-gray-300"
+              >
+                {selectedCount > 0 ? `Guardar ${selectedCount} figurita${selectedCount !== 1 ? 's' : ''}` : 'Seleccioná al menos una'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}

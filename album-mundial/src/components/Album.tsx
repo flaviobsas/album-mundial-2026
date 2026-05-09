@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import { GROUPS, TEAM_FULL, TEAM_ISO, TEAM_GRAD, PLAYERS } from '@/lib/data'
 import type { StickerState } from '@/lib/data'
 import Scanner from './Scanner'
+import BatchScanner from './BatchScanner'
 import StickerCard from './StickerCard'
 import Friends from './Friends'
 import Onboarding from './Onboarding'
@@ -36,6 +37,7 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [showScanner, setShowScanner] = useState(false)
+  const [showBatchScanner, setShowBatchScanner] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showShare, setShowShare] = useState(false)
   const [showFriends, setShowFriends] = useState(false)
@@ -149,6 +151,19 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
     else saveDelta(team, num, 1)
     setScannedResult(null)
     setShowScanner(keepScanning)
+  }
+
+  const handleBatchConfirm = (stickers: { team: string; num: number }[]) => {
+    const updates: Record<string, number> = {}
+    stickers.forEach(({ team, num }) => {
+      const k = stateKey(team, num)
+      const v = state[k] || 0
+      updates[k] = v === 0 ? 1 : v + 1
+      if (v === 0) saveOne(team, num, 1)
+      else saveDelta(team, num, 1)
+    })
+    setState(s => ({ ...s, ...updates }))
+    setShowBatchScanner(false)
   }
 
   const handleScanCancel = () => {
@@ -396,6 +411,14 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
           <span className="text-[10px] font-semibold text-gray-500">Amigos</span>
         </button>
 
+        {/* Escáner varias */}
+        <button onClick={() => setShowBatchScanner(true)} className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl hover:bg-gray-50 transition">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h3v3M17 14v3M14 17h3"/>
+          </svg>
+          <span className="text-[10px] font-semibold text-gray-500">Varias</span>
+        </button>
+
         {/* Escáner — centro */}
         <button onClick={() => setShowScanner(true)} className="w-14 h-14 rounded-full bg-gray-900 flex items-center justify-center shadow-lg hover:bg-gray-700 transition -mt-5">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -599,6 +622,11 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
       {/* Scanner */}
       {showScanner && (
         <Scanner state={state} onDetect={handleScanDetect} onClose={() => setShowScanner(false)} />
+      )}
+
+      {/* Batch Scanner */}
+      {showBatchScanner && (
+        <BatchScanner state={state} onConfirm={handleBatchConfirm} onClose={() => setShowBatchScanner(false)} />
       )}
     </div>
   )
