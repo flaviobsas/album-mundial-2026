@@ -224,9 +224,9 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
   const scanV = scannedResult ? (state[stateKey(scanTeam, scanNum)] || 0) : 0
   const scanPage = scannedResult ? getStickerPage(scanTeam, scanNum) : null
   const scanStatus = scanV === 0
-    ? `✨ ¡Figurita nueva! ${scanPage ? `Pégala en la página ${scanPage}` : 'Se marcará como tengo'}`
+    ? '✨ ¡Figurita nueva!'
     : scanV === 1
-      ? `🔁 ¡Ya la tenés! Se sumará como tu primera repetida`
+      ? '🔁 ¡Ya la tenés! Se sumará como primera repetida'
       : `🔁 ¡Ya la tenés! Tenés ${scanV - 1} repetida${scanV > 2 ? 's' : ''} — quedará x${scanV} de más`
 
   if (!profileComplete) {
@@ -283,8 +283,12 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
                   </svg>
                 </button>
                 {showMenu && (
-                  <div className="absolute top-11 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[180px] z-50">
+                  <div className="absolute top-11 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[200px] z-50">
                     <button onClick={logout} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 text-gray-600">Cerrar sesión</button>
+                    <div className="h-px bg-gray-100" />
+                    <button onClick={() => { setShowMenu(false); resetRepetidas() }} className="w-full text-left px-4 py-3 text-sm text-amber-600 hover:bg-amber-50">
+                      ↺ Borrar repetidas (re-escanear)
+                    </button>
                     <div className="h-px bg-gray-100" />
                     <button onClick={() => { if (confirm('¿Reiniciar todo el álbum?') && confirm('¿Estás seguro?')) resetAll(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50">Reiniciar álbum</button>
                   </div>
@@ -450,8 +454,12 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
             <span className="text-[10px] font-semibold text-gray-500">Menú</span>
           </button>
           {showMenu && (
-            <div className="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[180px] z-50">
+            <div className="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden min-w-[200px] z-50">
               <button onClick={logout} className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 text-gray-600">Cerrar sesión</button>
+              <div className="h-px bg-gray-100" />
+              <button onClick={() => { setShowMenu(false); resetRepetidas() }} className="w-full text-left px-4 py-3 text-sm text-amber-600 hover:bg-amber-50">
+                ↺ Borrar repetidas (re-escanear)
+              </button>
               <div className="h-px bg-gray-100" />
               <button onClick={() => { if (confirm('¿Reiniciar todo el álbum?') && confirm('¿Estás seguro?')) resetAll(); setShowMenu(false) }} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50">Reiniciar álbum</button>
             </div>
@@ -589,6 +597,12 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
                   {scanIso && <img src={`https://flagicons.lipis.dev/flags/4x3/${scanIso}.svg`} className="object-cover rounded-sm" style={{ width: 20, height: 14 }} alt="" />}
                   <span className="text-white/80 font-bold text-sm uppercase">{scanTeam} — {TEAM_FULL[scanTeam]}</span>
                 </div>
+                {scanPage && (
+                  <div className="flex items-baseline justify-center gap-1.5 mt-2">
+                    <span className="text-white/50 text-xs font-semibold uppercase tracking-wider">pág.</span>
+                    <span className="text-white font-black leading-none" style={{ fontSize: 48, textShadow: '0 2px 12px rgba(0,0,0,0.9)' }}>{scanPage}</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -755,5 +769,34 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reset: true })
     })
+  }
+
+  async function resetRepetidas() {
+    const toReset = Object.entries(state)
+      .filter(([, val]) => val >= 2)
+      .map(([key]) => {
+        const under = key.lastIndexOf('_')
+        return { team: key.slice(0, under), num: parseInt(key.slice(under + 1)) }
+      })
+    if (toReset.length === 0) { alert('No tenés figuritas repetidas.'); return }
+    if (!confirm(`¿Borrar las ${toReset.length} repetidas para poder re-escanearlas?`)) return
+    setState(s => {
+      const next = { ...s }
+      toReset.forEach(({ team, num }) => { next[stateKey(team, num)] = 1 })
+      return next
+    })
+    setSaveStatus('saving')
+    try {
+      await Promise.all(
+        toReset.map(({ team, num }) =>
+          fetch('/api/figuritas', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ team, num, valor: 1 }),
+          })
+        )
+      )
+      setSaveStatus('saved')
+    } catch { setSaveStatus('error') }
   }
 }
