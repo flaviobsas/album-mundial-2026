@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase'
-import { GROUPS, TEAM_FULL, TEAM_ISO, TEAM_GRAD, PLAYERS } from '@/lib/data'
+import { GROUPS, TEAM_FULL, TEAM_ISO, TEAM_GRAD, PLAYERS, getStickerPage } from '@/lib/data'
 import type { StickerState } from '@/lib/data'
 import Scanner from './Scanner'
 import BatchScanner from './BatchScanner'
@@ -222,9 +222,12 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
   const scanGrad = scanTeam ? (TEAM_GRAD[scanTeam] || '') : ''
   const scanIso = scanTeam ? (TEAM_ISO[scanTeam] || null) : null
   const scanV = scannedResult ? (state[stateKey(scanTeam, scanNum)] || 0) : 0
-  const scanStatus = scanV === 0 ? '✅ Se marcará como tengo'
-    : scanV === 1 ? '🔁 Ya la tenés — quedará como repetida x1'
-    : `🔁 Ya tenés ${scanV-1} repetida${scanV > 2 ? 's' : ''} — quedará x${scanV}`
+  const scanPage = scannedResult ? getStickerPage(scanTeam, scanNum) : null
+  const scanStatus = scanV === 0
+    ? `✨ ¡Figurita nueva! ${scanPage ? `Pégala en la página ${scanPage}` : 'Se marcará como tengo'}`
+    : scanV === 1
+      ? `🔁 ¡Ya la tenés! Se sumará como tu primera repetida`
+      : `🔁 ¡Ya la tenés! Tenés ${scanV - 1} repetida${scanV > 2 ? 's' : ''} — quedará x${scanV} de más`
 
   if (!profileComplete) {
     return <Onboarding user={user} onComplete={() => setProfileComplete(true)} />
@@ -594,15 +597,17 @@ export default function Album({ user, hasProfile, userName }: { user: User; hasP
               <p className={`text-sm text-center font-medium ${scanV === 0 ? 'text-green-600' : 'text-amber-600'}`}>
                 {scanStatus}
               </p>
-              <div className="flex gap-2">
-                <button onClick={handleScanCancel} className="py-3 px-4 rounded-xl border border-gray-200 text-sm font-semibold text-gray-500 hover:bg-gray-50 transition">
-                  ✕
-                </button>
-                <button onClick={() => handleScanConfirm(false)} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-gray-700 transition">
-                  ✓ Sí
-                </button>
-                <button onClick={() => handleScanConfirm(true)} className="flex-1 py-3 rounded-xl bg-gray-600 text-white text-sm font-semibold hover:bg-gray-500 transition">
-                  📷 Otra
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <button onClick={() => handleScanConfirm(false)} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-gray-700 transition">
+                    ✓ SÍ ES
+                  </button>
+                  <button onClick={() => handleScanConfirm(true)} className="flex-1 py-3 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 transition">
+                    📷 SÍ ES + otra
+                  </button>
+                </div>
+                <button onClick={handleScanCancel} className="w-full py-2.5 rounded-xl border border-red-200 text-sm font-semibold text-red-500 hover:bg-red-50 transition">
+                  ✕ NO ES esta figurita
                 </button>
               </div>
             </div>
