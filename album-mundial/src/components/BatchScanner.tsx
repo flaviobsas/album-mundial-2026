@@ -2,26 +2,17 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { PLAYERS, TEAM_FULL, TEAM_ISO } from '@/lib/data'
 import type { StickerState } from '@/lib/data'
-import { parseStickerText } from '@/lib/parseSticker'
 
-interface ScannedItem { team: string; num: number }
+interface DetectedSticker {
+  team: string
+  num: number
+  selected: boolean
+}
 
 interface BatchScannerProps {
   state: StickerState
-  onConfirm: (stickers: ScannedItem[]) => void
+  onConfirm: (stickers: { team: string; num: number }[]) => void
   onClose: () => void
-}
-
-async function callVision(base64: string): Promise<string> {
-  const res = await fetch('/api/scan', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: base64 }),
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const data = await res.json()
-  if (data.error) throw new Error(data.error)
-  return (data.text || 'NONE').trim().toUpperCase()
 }
 
 function captureFrame(video: HTMLVideoElement): string {
@@ -35,49 +26,24 @@ function captureFrame(video: HTMLVideoElement): string {
 export default function BatchScanner({ state, onConfirm, onClose }: BatchScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const intervalRef = useRef<NodeJS.Timeout | null>(null)
-  const busyRef = useRef(false)
-
-  const [scanned, setScanned] = useState<ScannedItem[]>([])
+  const [detected, setDetected] = useState<DetectedSticker[]>([])
+  const [scanning, setScanning] = useState(false)
   const [status, setStatus] = useState('Iniciando cámara...')
-  const [flashKey, setFlashKey] = useState(0)
-  const [attempts, setAttempts] = useState(0)
-  const [reviewing, setReviewing] = useState(false)
+  const [cameraReady, setCameraReady] = useState(false)
+  const [rawText, setRawText] = useState('')
 
-  const stopCamera = useCallback(() => {
-    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
-    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
+  const stopStream = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
   }, [])
-
-  const addSticker = useCallback((team: string, num: number) => {
-    setScanned(prev => {
-      if (prev.some(s => s.team === team && s.num === num)) return prev
-      return [...prev, { team, num }]
-    })
-    setFlashKey(k => k + 1)
-  }, [])
-
-  const autoScan = useCallback(async () => {
-    if (busyRef.current || !videoRef.current?.videoWidth) return
-    busyRef.current = true
-    setAttempts(a => a + 1)
-    try {
-      const base64 = captureFrame(videoRef.current!)
-      const text = await callVision(base64)
-      if (text && text !== 'NONE') {
-        const parsed = parseStickerText(text)
-        if (parsed) addSticker(parsed.team, parsed.num)
-      }
-    } catch {}
-    busyRef.current = false
-  }, [addSticker])
 
   const startCamera = useCallback(async () => {
-    busyRef.current = false
+    setCameraReady(false)
     const constraints = [
-      { video: { facingMode: { exact: 'environment' }, width: { ideal: 1280 } } },
+      { video: { facingMode: { exact: 'environment' }, width: { ideal: 1920 } } },
       { video: { facingMode: 'environment' } },
-      { video: { facingMode: { ideal: 'environment' } } },
       { video: true },
     ]
     for (const c of constraints) {
@@ -88,130 +54,129 @@ export default function BatchScanner({ state, onConfirm, onClose }: BatchScanner
           videoRef.current.srcObject = stream
           await videoRef.current.play()
         }
-        setStatus('Mostrá el reverso de cada figurita una por una')
-        setTimeout(() => {
-          autoScan()
-          intervalRef.current = setInterval(autoScan, 2500)
-        }, 1500)
+        setStatus('Poné las figuritas boca abajo y capturá')
+        setCameraReady(true)
         return
       } catch {}
     }
     setStatus('No se pudo acceder a la cámara')
-  }, [autoScan])
+  }, [])
 
-  // Arranca/reinicia cámara cada vez que se sale de la pantalla de revisión
   useEffect(() => {
-    if (!reviewing) {
-      startCamera()
-    }
-    return () => stopCamera()
-  }, [reviewing, startCamera, stopCamera])
+    startCamera()
+    return () => stopStream()
+  }, [startCamera, stopStream])
 
-  const removeSticker = (idx: number) => setScanned(prev => prev.filter((_, i) => i !== idx))
+  const capture = useCallback(async () => {
+    if (!videoRef.current?.videoWidth || scanning) return
+    setScanning(true)
+    setStatus('Analizando...')
+    try {
+      const base64 = captureFrame(videoRef.current!)
+      const res = await fetch('/api/scan-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64 }),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setRawText(data.raw || '')
+      const stickers: { team: string; num: number }[] = data.stickers || []
+      if (stickers.length === 0) {
+        setStatus('No detecté figuritas. Asegurate de mostrar el reverso.')
+        setScanning(false)
+        return
+      }
+      stopStream()
+      setDetected(stickers.map(s => ({ ...s, selected: true })))
+    } catch (e) {
+      setStatus(`Error: ${e}`)
+      setScanning(false)
+    }
+    setScanning(false)
+  }, [scanning, stopStream])
+
+  const toggle = (idx: number) => {
+    setDetected(d => d.map((s, i) => i === idx ? { ...s, selected: !s.selected } : s))
+  }
+
+  const retry = () => {
+    setDetected([])
+    setRawText('')
+    setStatus('Poné las figuritas boca abajo y capturá')
+    startCamera()
+  }
+
+  const selectedCount = detected.filter(s => s.selected).length
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-2">
       <div className="bg-white rounded-2xl overflow-hidden w-full max-w-sm flex flex-col max-h-[92vh]">
 
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-          <h3 className="font-semibold text-gray-900">📷 Escaneo rápido</h3>
+          <h3 className="font-semibold text-gray-900">📷 Escanear varias</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500">✕</button>
         </div>
 
-        {!reviewing ? (
+        {detected.length === 0 ? (
           <>
-            {/* Cámara */}
-            <div className="relative bg-black" style={{ aspectRatio: '3/4' }}>
+            {/* Cámara - pantalla completa, sin marco pequeño */}
+            <div className="relative bg-black" style={{ aspectRatio: '4/3' }}>
               <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
 
-              {/* Marco de escaneo */}
-              <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute" style={{ top: '6%', right: '4%', width: '44%', height: '18%' }}>
-                  <div className="absolute inset-0" style={{
-                    border: '2.5px solid #22c55e',
-                    borderRadius: 10,
-                    boxShadow: '0 0 0 2000px rgba(0,0,0,0.5)'
-                  }} />
-                  <div className="absolute top-0 left-0 w-5 h-5 border-l-[3px] border-t-[3px] border-green-400 rounded-tl-lg" />
-                  <div className="absolute bottom-0 right-0 w-5 h-5 border-r-[3px] border-b-[3px] border-green-400 rounded-br-lg" />
-                </div>
-                <div className="absolute text-white/80 text-xs font-medium bg-black/50 px-2 py-1 rounded-lg" style={{ top: '26%', right: '4%' }}>
-                  Código aquí ↗
-                </div>
-              </div>
-
-              {/* Flash verde al detectar */}
-              {flashKey > 0 && (
-                <div key={flashKey} className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="bg-green-500/90 text-white font-bold text-lg px-6 py-3 rounded-2xl shadow-lg" style={{ animation: 'fadeOut 1.2s forwards' }}>
-                    ✓ Detectada
+              {/* Overlay con instrucción */}
+              {!scanning && cameraReady && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <div className="border-2 border-dashed border-white/50 rounded-2xl mx-6 my-8 flex-1 w-[calc(100%-3rem)] flex items-center justify-center">
+                    <span className="text-white/70 text-sm font-medium text-center px-4">
+                      Extendé las figuritas boca abajo aquí
+                    </span>
                   </div>
                 </div>
               )}
 
-              <div className="absolute bottom-3 left-0 right-0 flex items-center justify-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                <span className="text-white/80 text-xs">Intento {attempts}</span>
-              </div>
-            </div>
-
-            <div className="p-3 flex flex-col gap-2">
-              <p className="text-xs text-center text-gray-500">{status}</p>
-
-              {/* Chips de figuritas detectadas */}
-              {scanned.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
-                  {scanned.map((s, i) => {
-                    const iso = TEAM_ISO[s.team]
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => removeSticker(i)}
-                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 text-xs font-semibold text-gray-700 hover:bg-red-100 hover:text-red-600 transition"
-                        title="Tocar para quitar"
-                      >
-                        {iso && <img src={`https://flagicons.lipis.dev/flags/4x3/${iso}.svg`} className="w-4 h-3 object-cover rounded-sm" alt="" onError={e => (e.currentTarget.style.display='none')} />}
-                        {s.team} {s.num} <span className="text-gray-400">✕</span>
-                      </button>
-                    )
-                  })}
+              {scanning && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60">
+                  <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin mb-3" />
+                  <span className="text-white text-sm font-medium">Analizando...</span>
                 </div>
               )}
+            </div>
 
+            <div className="p-4 flex flex-col gap-3">
+              <p className="text-sm text-center text-gray-500">{status}</p>
               <button
-                onClick={() => { stopCamera(); setReviewing(true) }}
-                className="w-full py-3.5 bg-gray-900 text-white rounded-xl text-sm font-bold hover:bg-gray-700 transition"
+                onClick={capture}
+                disabled={!cameraReady || scanning}
+                className="w-full py-4 bg-gray-900 text-white rounded-xl text-base font-bold hover:bg-gray-700 active:scale-95 transition disabled:bg-gray-300"
               >
-                {scanned.length > 0
-                  ? `Listo — revisar ${scanned.length} figurita${scanned.length !== 1 ? 's' : ''}`
-                  : 'Listo'}
+                {scanning ? '⏳ Analizando...' : '📷 Capturar'}
               </button>
+              <p className="text-xs text-center text-gray-400">
+                Mostrá el <strong>reverso</strong> de las figuritas — donde está el código
+              </p>
             </div>
           </>
         ) : (
           <>
             <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
-              <span className="text-sm font-semibold text-gray-700">
-                {scanned.length} figurita{scanned.length !== 1 ? 's' : ''} para guardar
-              </span>
-              <button
-                onClick={() => setReviewing(false)}
-                className="text-xs text-gray-400 underline"
-              >
-                Seguir escaneando
-              </button>
+              <span className="text-sm font-semibold text-gray-700">{selectedCount} seleccionada{selectedCount !== 1 ? 's' : ''}</span>
+              <button onClick={retry} className="text-xs text-gray-400 underline">Volver a escanear</button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-              {scanned.length === 0 && (
-                <p className="text-sm text-center text-gray-400 py-8">No hay figuritas escaneadas</p>
-              )}
-              {scanned.map((s, i) => {
+              {detected.map((s, i) => {
                 const playerName = PLAYERS[s.team]?.[s.num] || `${s.team} ${s.num}`
                 const iso = TEAM_ISO[s.team]
                 const current = state[`${s.team}_${s.num}`] || 0
                 return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-gray-100 bg-gray-50">
+                  <button
+                    key={i}
+                    onClick={() => toggle(i)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition ${
+                      s.selected ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'
+                    }`}
+                  >
                     {iso && (
                       <img
                         src={`https://flagicons.lipis.dev/flags/4x3/${iso}.svg`}
@@ -221,42 +186,48 @@ export default function BatchScanner({ state, onConfirm, onClose }: BatchScanner
                       />
                     )}
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-bold text-gray-900">{s.team} {s.num} — {TEAM_FULL[s.team] || s.team}</div>
-                      <div className="text-xs text-gray-400 truncate">{playerName}</div>
+                      <div className={`text-sm font-bold ${s.selected ? 'text-white' : 'text-gray-900'}`}>
+                        {s.team} {s.num} — {TEAM_FULL[s.team] || s.team}
+                      </div>
+                      <div className={`text-xs truncate ${s.selected ? 'text-gray-400' : 'text-gray-400'}`}>
+                        {playerName}
+                      </div>
                     </div>
                     {current > 0 && (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 flex-shrink-0">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                        s.selected ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'
+                      }`}>
                         {current === 1 ? 'ya tenés' : `×${current - 1} rep`}
                       </span>
                     )}
-                    <button onClick={() => removeSticker(i)} className="text-gray-300 hover:text-red-400 transition text-lg leading-none flex-shrink-0">✕</button>
-                  </div>
+                    <span className={`text-base flex-shrink-0 ${s.selected ? 'text-white' : 'text-gray-300'}`}>
+                      {s.selected ? '✓' : '○'}
+                    </span>
+                  </button>
                 )
               })}
+
+              {/* Texto crudo para debugging */}
+              {rawText && (
+                <details className="mt-2">
+                  <summary className="text-[10px] text-gray-300 cursor-pointer">OCR raw</summary>
+                  <pre className="text-[9px] text-gray-400 mt-1 whitespace-pre-wrap break-all">{rawText}</pre>
+                </details>
+              )}
             </div>
 
             <div className="p-4 border-t border-gray-100">
               <button
-                onClick={() => onConfirm(scanned)}
-                disabled={scanned.length === 0}
+                onClick={() => onConfirm(detected.filter(s => s.selected).map(({ team, num }) => ({ team, num })))}
+                disabled={selectedCount === 0}
                 className="w-full py-3 bg-gray-900 text-white rounded-xl text-sm font-bold hover:bg-gray-700 transition disabled:bg-gray-300"
               >
-                {scanned.length > 0
-                  ? `Guardar ${scanned.length} figurita${scanned.length !== 1 ? 's' : ''}`
-                  : 'Nada para guardar'}
+                {selectedCount > 0 ? `Guardar ${selectedCount} figurita${selectedCount !== 1 ? 's' : ''}` : 'Seleccioná al menos una'}
               </button>
             </div>
           </>
         )}
       </div>
-
-      <style>{`
-        @keyframes fadeOut {
-          0% { opacity: 1; transform: scale(1); }
-          70% { opacity: 1; transform: scale(1); }
-          100% { opacity: 0; transform: scale(0.9); }
-        }
-      `}</style>
     </div>
   )
 }

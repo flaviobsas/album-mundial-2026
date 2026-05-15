@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({
           requests: [{
             image: { content: image },
-            features: [{ type: 'TEXT_DETECTION', maxResults: 50 }]
+            features: [{ type: 'DOCUMENT_TEXT_DETECTION' }]
           }]
         })
       }
