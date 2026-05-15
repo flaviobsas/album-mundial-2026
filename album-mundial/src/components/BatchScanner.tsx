@@ -26,9 +26,10 @@ function captureFrame(video: HTMLVideoElement): string {
 export default function BatchScanner({ state, onConfirm, onClose }: BatchScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const [phase, setPhase] = useState<'camera' | 'review'>('camera')
   const [detected, setDetected] = useState<DetectedSticker[]>([])
   const [scanning, setScanning] = useState(false)
-  const [status, setStatus] = useState('Iniciando cámara...')
+  const [camStatus, setCamStatus] = useState('Iniciando cámara...')
   const [cameraReady, setCameraReady] = useState(false)
   const [rawText, setRawText] = useState('')
 
@@ -54,12 +55,12 @@ export default function BatchScanner({ state, onConfirm, onClose }: BatchScanner
           videoRef.current.srcObject = stream
           await videoRef.current.play()
         }
-        setStatus('Poné las figuritas boca abajo y capturá')
+        setCamStatus('Poné las figuritas boca abajo y capturá')
         setCameraReady(true)
         return
       } catch {}
     }
-    setStatus('No se pudo acceder a la cámara')
+    setCamStatus('No se pudo acceder a la cámara')
   }, [])
 
   useEffect(() => {
@@ -70,7 +71,7 @@ export default function BatchScanner({ state, onConfirm, onClose }: BatchScanner
   const capture = useCallback(async () => {
     if (!videoRef.current?.videoWidth || scanning) return
     setScanning(true)
-    setStatus('Analizando...')
+    setCamStatus('Analizando...')
     try {
       const base64 = captureFrame(videoRef.current!)
       const res = await fetch('/api/scan-batch', {
@@ -79,33 +80,27 @@ export default function BatchScanner({ state, onConfirm, onClose }: BatchScanner
         body: JSON.stringify({ image: base64 }),
       })
       const data = await res.json()
-      if (data.error) throw new Error(data.error)
-      setRawText(data.raw || '')
       const stickers: { team: string; num: number }[] = data.stickers || []
-      if (stickers.length === 0) {
-        setStatus('No detecté figuritas. Asegurate de mostrar el reverso.')
-        setScanning(false)
-        return
-      }
+      const raw: string = data.raw || data.error || ''
       stopStream()
+      setRawText(raw)
       setDetected(stickers.map(s => ({ ...s, selected: true })))
+      setPhase('review')
     } catch (e) {
-      setStatus(`Error: ${e}`)
-      setScanning(false)
+      setCamStatus(`Error: ${e}`)
     }
     setScanning(false)
   }, [scanning, stopStream])
 
-  const toggle = (idx: number) => {
-    setDetected(d => d.map((s, i) => i === idx ? { ...s, selected: !s.selected } : s))
-  }
-
   const retry = () => {
     setDetected([])
     setRawText('')
-    setStatus('Poné las figuritas boca abajo y capturá')
+    setPhase('camera')
     startCamera()
   }
+
+  const toggle = (idx: number) =>
+    setDetected(d => d.map((s, i) => i === idx ? { ...s, selected: !s.selected } : s))
 
   const selectedCount = detected.filter(s => s.selected).length
 
@@ -118,23 +113,19 @@ export default function BatchScanner({ state, onConfirm, onClose }: BatchScanner
           <button onClick={onClose} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500">✕</button>
         </div>
 
-        {detected.length === 0 ? (
+        {phase === 'camera' ? (
           <>
-            {/* Cámara - pantalla completa, sin marco pequeño */}
             <div className="relative bg-black" style={{ aspectRatio: '4/3' }}>
               <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-
-              {/* Overlay con instrucción */}
               {!scanning && cameraReady && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <div className="border-2 border-dashed border-white/50 rounded-2xl mx-6 my-8 flex-1 w-[calc(100%-3rem)] flex items-center justify-center">
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="border-2 border-dashed border-white/50 rounded-2xl m-6 flex-1 self-stretch flex items-center justify-center">
                     <span className="text-white/70 text-sm font-medium text-center px-4">
                       Extendé las figuritas boca abajo aquí
                     </span>
                   </div>
                 </div>
               )}
-
               {scanning && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60">
                   <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin mb-3" />
@@ -142,9 +133,8 @@ export default function BatchScanner({ state, onConfirm, onClose }: BatchScanner
                 </div>
               )}
             </div>
-
             <div className="p-4 flex flex-col gap-3">
-              <p className="text-sm text-center text-gray-500">{status}</p>
+              <p className="text-sm text-center text-gray-500">{camStatus}</p>
               <button
                 onClick={capture}
                 disabled={!cameraReady || scanning}
@@ -153,78 +143,86 @@ export default function BatchScanner({ state, onConfirm, onClose }: BatchScanner
                 {scanning ? '⏳ Analizando...' : '📷 Capturar'}
               </button>
               <p className="text-xs text-center text-gray-400">
-                Mostrá el <strong>reverso</strong> de las figuritas — donde está el código
+                Mostrá el <strong>reverso</strong> de las figuritas donde está el código
               </p>
             </div>
           </>
         ) : (
           <>
             <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
-              <span className="text-sm font-semibold text-gray-700">{selectedCount} seleccionada{selectedCount !== 1 ? 's' : ''}</span>
-              <button onClick={retry} className="text-xs text-gray-400 underline">Volver a escanear</button>
+              <span className="text-sm font-semibold text-gray-700">
+                {detected.length === 0 ? 'No se detectaron figuritas' : `${selectedCount} seleccionada${selectedCount !== 1 ? 's' : ''}`}
+              </span>
+              <button onClick={retry} className="text-xs text-blue-500 underline">Reintentar</button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-              {detected.map((s, i) => {
-                const playerName = PLAYERS[s.team]?.[s.num] || `${s.team} ${s.num}`
-                const iso = TEAM_ISO[s.team]
-                const current = state[`${s.team}_${s.num}`] || 0
-                return (
-                  <button
-                    key={i}
-                    onClick={() => toggle(i)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition ${
-                      s.selected ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'
-                    }`}
-                  >
-                    {iso && (
-                      <img
-                        src={`https://flagicons.lipis.dev/flags/4x3/${iso}.svg`}
-                        className="w-8 h-6 object-cover rounded-sm flex-shrink-0"
-                        alt={s.team}
-                        onError={e => (e.currentTarget.style.display = 'none')}
-                      />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-sm font-bold ${s.selected ? 'text-white' : 'text-gray-900'}`}>
-                        {s.team} {s.num} — {TEAM_FULL[s.team] || s.team}
-                      </div>
-                      <div className={`text-xs truncate ${s.selected ? 'text-gray-400' : 'text-gray-400'}`}>
-                        {playerName}
-                      </div>
+              {detected.length === 0 ? (
+                <div className="py-4 flex flex-col gap-2">
+                  <p className="text-sm text-center text-gray-500">
+                    El OCR no encontró códigos de figuritas.<br />
+                    <span className="text-xs text-gray-400">Probá mostrar el reverso más cerca o con mejor luz.</span>
+                  </p>
+                  {rawText ? (
+                    <div className="mt-2 bg-gray-50 rounded-xl p-3">
+                      <p className="text-[10px] text-gray-400 font-semibold mb-1 uppercase tracking-wide">Texto detectado por OCR:</p>
+                      <pre className="text-xs text-gray-600 whitespace-pre-wrap break-all">{rawText}</pre>
                     </div>
-                    {current > 0 && (
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
-                        s.selected ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'
-                      }`}>
-                        {current === 1 ? 'ya tenés' : `×${current - 1} rep`}
+                  ) : (
+                    <p className="text-xs text-center text-gray-400">El OCR no detectó ningún texto en la imagen.</p>
+                  )}
+                </div>
+              ) : (
+                detected.map((s, i) => {
+                  const playerName = PLAYERS[s.team]?.[s.num] || `${s.team} ${s.num}`
+                  const iso = TEAM_ISO[s.team]
+                  const current = state[`${s.team}_${s.num}`] || 0
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => toggle(i)}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition ${
+                        s.selected ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'
+                      }`}
+                    >
+                      {iso && (
+                        <img src={`https://flagicons.lipis.dev/flags/4x3/${iso}.svg`}
+                          className="w-8 h-6 object-cover rounded-sm flex-shrink-0" alt={s.team}
+                          onError={e => (e.currentTarget.style.display = 'none')} />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-bold ${s.selected ? 'text-white' : 'text-gray-900'}`}>
+                          {s.team} {s.num} — {TEAM_FULL[s.team] || s.team}
+                        </div>
+                        <div className="text-xs text-gray-400 truncate">{playerName}</div>
+                      </div>
+                      {current > 0 && (
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                          s.selected ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'
+                        }`}>
+                          {current === 1 ? 'ya tenés' : `×${current - 1} rep`}
+                        </span>
+                      )}
+                      <span className={`text-base flex-shrink-0 ${s.selected ? 'text-white' : 'text-gray-300'}`}>
+                        {s.selected ? '✓' : '○'}
                       </span>
-                    )}
-                    <span className={`text-base flex-shrink-0 ${s.selected ? 'text-white' : 'text-gray-300'}`}>
-                      {s.selected ? '✓' : '○'}
-                    </span>
-                  </button>
-                )
-              })}
-
-              {/* Texto crudo para debugging */}
-              {rawText && (
-                <details className="mt-2">
-                  <summary className="text-[10px] text-gray-300 cursor-pointer">OCR raw</summary>
-                  <pre className="text-[9px] text-gray-400 mt-1 whitespace-pre-wrap break-all">{rawText}</pre>
-                </details>
+                    </button>
+                  )
+                })
               )}
             </div>
 
-            <div className="p-4 border-t border-gray-100">
-              <button
-                onClick={() => onConfirm(detected.filter(s => s.selected).map(({ team, num }) => ({ team, num })))}
-                disabled={selectedCount === 0}
-                className="w-full py-3 bg-gray-900 text-white rounded-xl text-sm font-bold hover:bg-gray-700 transition disabled:bg-gray-300"
-              >
-                {selectedCount > 0 ? `Guardar ${selectedCount} figurita${selectedCount !== 1 ? 's' : ''}` : 'Seleccioná al menos una'}
-              </button>
-            </div>
+            {detected.length > 0 && (
+              <div className="p-4 border-t border-gray-100">
+                <button
+                  onClick={() => onConfirm(detected.filter(s => s.selected).map(({ team, num }) => ({ team, num })))}
+                  disabled={selectedCount === 0}
+                  className="w-full py-3 bg-gray-900 text-white rounded-xl text-sm font-bold hover:bg-gray-700 transition disabled:bg-gray-300"
+                >
+                  {selectedCount > 0 ? `Guardar ${selectedCount} figurita${selectedCount !== 1 ? 's' : ''}` : 'Seleccioná al menos una'}
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
