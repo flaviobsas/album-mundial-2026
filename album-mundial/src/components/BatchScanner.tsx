@@ -69,25 +69,28 @@ export default function BatchScanner({ state, onConfirm, onClose }: BatchScanner
   }, [startCamera, stopStream])
 
   const capture = useCallback(async () => {
-    if (!videoRef.current?.videoWidth || scanning) return
+    if (scanning) return
+    if (!videoRef.current) { setCamStatus('Cámara no lista, reintentá'); return }
     setScanning(true)
-    setCamStatus('Analizando...')
+    setCamStatus('Capturando...')
     try {
-      const base64 = captureFrame(videoRef.current!)
+      const base64 = captureFrame(videoRef.current)
+      setCamStatus('Enviando a analizar...')
       const res = await fetch('/api/scan-batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: base64 }),
       })
+      setCamStatus('Procesando respuesta...')
       const data = await res.json()
       const stickers: { team: string; num: number }[] = data.stickers || []
-      const raw: string = data.raw || data.error || ''
+      const raw: string = data.raw || data.error || '(sin texto)'
       stopStream()
       setRawText(raw)
       setDetected(stickers.map(s => ({ ...s, selected: true })))
       setPhase('review')
     } catch (e) {
-      setCamStatus(`Error: ${e}`)
+      setCamStatus(`Error: ${e instanceof Error ? e.message : e}`)
     }
     setScanning(false)
   }, [scanning, stopStream])
@@ -137,10 +140,10 @@ export default function BatchScanner({ state, onConfirm, onClose }: BatchScanner
               <p className="text-sm text-center text-gray-500">{camStatus}</p>
               <button
                 onClick={capture}
-                disabled={!cameraReady || scanning}
+                disabled={scanning}
                 className="w-full py-4 bg-gray-900 text-white rounded-xl text-base font-bold hover:bg-gray-700 active:scale-95 transition disabled:bg-gray-300"
               >
-                {scanning ? '⏳ Analizando...' : '📷 Capturar'}
+                {scanning ? '⏳ Procesando...' : '📷 Capturar'}
               </button>
               <p className="text-xs text-center text-gray-400">
                 Mostrá el <strong>reverso</strong> de las figuritas donde está el código
