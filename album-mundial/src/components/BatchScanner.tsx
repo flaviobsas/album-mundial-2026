@@ -16,11 +16,13 @@ interface BatchScannerProps {
 }
 
 function captureFrame(video: HTMLVideoElement): string {
+  const w = video.videoWidth > 0 ? video.videoWidth : 1280
+  const h = video.videoHeight > 0 ? video.videoHeight : 960
   const canvas = document.createElement('canvas')
-  canvas.width = video.videoWidth
-  canvas.height = video.videoHeight
-  canvas.getContext('2d')!.drawImage(video, 0, 0)
-  return canvas.toDataURL('image/jpeg', 0.92).split(',')[1]
+  canvas.width = w
+  canvas.height = h
+  canvas.getContext('2d')!.drawImage(video, 0, 0, w, h)
+  return canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
 }
 
 export default function BatchScanner({ state, onConfirm, onClose }: BatchScannerProps) {
@@ -54,6 +56,15 @@ export default function BatchScanner({ state, onConfirm, onClose }: BatchScanner
         if (videoRef.current) {
           videoRef.current.srcObject = stream
           await videoRef.current.play()
+          // Esperar a que el video reporte dimensiones reales (necesario en iOS)
+          if (videoRef.current.videoWidth === 0) {
+            await new Promise<void>(resolve => {
+              const t = setTimeout(resolve, 2000)
+              videoRef.current!.addEventListener('loadedmetadata', () => {
+                clearTimeout(t); resolve()
+              }, { once: true })
+            })
+          }
         }
         setCamStatus('Poné las figuritas boca abajo y capturá')
         setCameraReady(true)
