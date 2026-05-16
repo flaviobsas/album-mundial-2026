@@ -128,39 +128,41 @@ export default function BatchScanner({ state, onConfirm, onClose }: BatchScanner
         </div>
 
         {phase === 'camera' ? (
-          <>
-            <div className="relative bg-black" style={{ aspectRatio: '4/3' }}>
-              <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-              {!scanning && cameraReady && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="border-2 border-dashed border-white/50 rounded-2xl m-6 flex-1 self-stretch flex items-center justify-center">
-                    <span className="text-white/70 text-sm font-medium text-center px-4">
-                      Extendé las figuritas boca abajo aquí
-                    </span>
-                  </div>
-                </div>
+          <div className="relative bg-black flex-1 min-h-0">
+            <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+
+            {/* Guía visual */}
+            {!scanning && (
+              <div className="absolute inset-x-4 top-4 bottom-24 border-2 border-dashed border-white/40 rounded-2xl flex items-center justify-center pointer-events-none">
+                <span className="text-white/70 text-sm font-medium text-center px-6">
+                  Extendé las figuritas boca abajo aquí
+                </span>
+              </div>
+            )}
+
+            {/* Spinner al analizar */}
+            {scanning && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 pointer-events-none">
+                <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin mb-3" />
+                <span className="text-white text-sm font-semibold">{camStatus}</span>
+              </div>
+            )}
+
+            {/* Botón capturar siempre visible sobre la cámara */}
+            <div className="absolute bottom-0 inset-x-0 p-4 flex flex-col items-center gap-2"
+              style={{ background: 'linear-gradient(0deg, rgba(0,0,0,0.7) 0%, transparent 100%)' }}>
+              {!scanning && (
+                <span className="text-white/60 text-xs">{camStatus}</span>
               )}
-              {scanning && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60">
-                  <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin mb-3" />
-                  <span className="text-white text-sm font-medium">Analizando...</span>
-                </div>
-              )}
-            </div>
-            <div className="p-4 flex flex-col gap-3">
-              <p className="text-sm text-center text-gray-500">{camStatus}</p>
               <button
                 onClick={capture}
                 disabled={scanning}
-                className="w-full py-4 bg-gray-900 text-white rounded-xl text-base font-bold hover:bg-gray-700 active:scale-95 transition disabled:bg-gray-300"
+                className="w-full py-4 bg-white text-gray-900 rounded-2xl text-base font-bold active:scale-95 transition disabled:opacity-50"
               >
                 {scanning ? '⏳ Procesando...' : '📷 Capturar'}
               </button>
-              <p className="text-xs text-center text-gray-400">
-                Mostrá el <strong>reverso</strong> de las figuritas donde está el código
-              </p>
             </div>
-          </>
+          </div>
         ) : (
           <>
             <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
